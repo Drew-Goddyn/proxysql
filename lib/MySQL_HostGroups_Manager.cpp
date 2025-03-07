@@ -572,7 +572,52 @@ hg_metrics_map = std::make_tuple(
 			"proxysql_connpool_conns_status",
 			"The status of the backend server (1 - ONLINE, 2 - SHUNNED, 3 - OFFLINE_SOFT, 4 - OFFLINE_HARD, 5 - SHUNNED_REPLICATION_LAG).",
 			metric_tags {}
+		),
+		// PMM-Compatibility metrics
+		////////////////////////////////////////////////////////////////////////
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_status,
+			"proxysql_runtime_mysql_servers_status",
+			"The status of the backend server (1 - ONLINE, 2 - SHUNNED, 3 - OFFLINE_SOFT, 4 - OFFLINE_HARD, 5 - SHUNNED_REPLICATION_LAG).",
+			metric_tags {}
+		),
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_weight,
+			"proxysql_runtime_mysql_servers_weight",
+			"Configured 'weight' for the backend server.",
+			metric_tags {}
+		),
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_compression,
+			"proxysql_runtime_mysql_servers_compression",
+			"If 'compression' is enabled for the backend server.",
+			metric_tags {}
+		),
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_max_connections,
+			"proxysql_runtime_mysql_servers_max_connections",
+			"Configured 'max_connections' for the backend server.",
+			metric_tags {}
+		),
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_max_replication_lag,
+			"proxysql_runtime_mysql_servers_max_replication_lag",
+			"Configured 'max_replication_lag' for the backend server.",
+			metric_tags {}
+		),
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_use_ssl,
+			"proxysql_runtime_mysql_servers_use_ssl",
+			"If 'ssl' is enabled for the backend server.",
+			metric_tags {}
+		),
+		std::make_tuple (
+			p_hg_dyn_gauge::runtime_servers_max_latency_ms,
+			"proxysql_runtime_mysql_servers_max_latency_ms",
+			"Configured 'max_latency_ms' for the backend server.",
+			metric_tags {}
 		)
+		////////////////////////////////////////////////////////////////////////
 	}
 );
 
@@ -3408,6 +3453,69 @@ void MySQL_HostGroups_Manager::p_update_connection_pool() {
 			// proxysql_connection_pool_status metric
 			p_update_connection_pool_update_gauge(endpoint_id, common_labels,
 				status.p_connection_pool_status_map, ((int)mysrvc->get_status()) + 1, p_hg_dyn_gauge::connection_pool_status);
+
+			// PMM-Compatibility metrics
+			////////////////////////////////////////////////////////////////////
+			std::map<std::string, std::string> srvs_common_labels = common_labels;
+			srvs_common_labels.insert({"gtid_port", std::to_string(mysrvc->gtid_port)});
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_status_map,
+				((int)mysrvc->get_status()) + 1,
+				p_hg_dyn_gauge::runtime_servers_status
+			);
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_weight_map,
+				mysrvc->weight,
+				p_hg_dyn_gauge::runtime_servers_weight
+			);
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_compress_map,
+				mysrvc->compression,
+				p_hg_dyn_gauge::runtime_servers_compression
+			);
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_max_conns_map,
+				mysrvc->max_connections,
+				p_hg_dyn_gauge::runtime_servers_max_connections
+			);
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_max_repl_lag_map,
+				mysrvc->max_replication_lag,
+				p_hg_dyn_gauge::runtime_servers_max_replication_lag
+			);
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_use_ssl_map,
+				mysrvc->use_ssl,
+				p_hg_dyn_gauge::runtime_servers_use_ssl
+			);
+
+			p_update_connection_pool_update_gauge(
+				endpoint_id,
+				srvs_common_labels,
+				status.p_runtime_servers_max_lat_map,
+				mysrvc->max_latency_us / 1000,
+				p_hg_dyn_gauge::runtime_servers_max_latency_ms
+			);
+
+			////////////////////////////////////////////////////////////////////
 		}
 	}
 
@@ -3436,6 +3544,37 @@ void MySQL_HostGroups_Manager::p_update_connection_pool() {
 		gauge = status.p_connection_pool_latency_us_map[key];
 		status.p_dyn_gauge_array[p_hg_dyn_gauge::connection_pool_latency_us]->Remove(gauge);
 		status.p_connection_pool_latency_us_map.erase(key);
+
+		// PMM-Compatibility metrics
+		////////////////////////////////////////////////////////////////////
+		gauge = status.p_runtime_servers_status_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_status]->Remove(gauge);
+		status.p_runtime_servers_status_map.erase(key);
+
+		gauge = status.p_runtime_servers_weight_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_weight]->Remove(gauge);
+		status.p_runtime_servers_weight_map.erase(key);
+
+		gauge = status.p_runtime_servers_compress_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_compression]->Remove(gauge);
+		status.p_runtime_servers_compress_map.erase(key);
+
+		gauge = status.p_runtime_servers_max_conns_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_max_connections]->Remove(gauge);
+		status.p_runtime_servers_max_conns_map.erase(key);
+
+		gauge = status.p_runtime_servers_max_repl_lag_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_max_replication_lag]->Remove(gauge);
+		status.p_runtime_servers_max_repl_lag_map.erase(key);
+
+		gauge = status.p_runtime_servers_use_ssl_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_use_ssl]->Remove(gauge);
+		status.p_runtime_servers_use_ssl_map.erase(key);
+
+		gauge = status.p_runtime_servers_max_lat_map[key];
+		status.p_dyn_gauge_array[p_hg_dyn_gauge::runtime_servers_max_latency_ms]->Remove(gauge);
+		status.p_runtime_servers_max_lat_map.erase(key);
+		////////////////////////////////////////////////////////////////////
 	}
 
 	wrunlock();
