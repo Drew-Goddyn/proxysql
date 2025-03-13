@@ -99,9 +99,9 @@ jobs:
         ./setup.sh test_${{ env.TESTNAME }}/${{ env.TESTNAME }}
         git switch ${{ env.TESTTREE }}
         git pull
-        git config user.email "GH-Actions@proxysql.com"
-        git config user.name "GH-Actions"
-        git rebase main -f -s recursive -X theirs
+        #git config user.email "GH-Actions@proxysql.com"
+        #git config user.name "GH-Actions"
+        #git rebase main -f -s recursive -X theirs
 
         # use cached build
         rm -rf ./proxysql && mv ../proxysql . || true
