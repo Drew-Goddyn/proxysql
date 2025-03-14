@@ -14,7 +14,7 @@ env:
 
 jobs:
   clean:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Clean packages
       env:
@@ -38,7 +38,7 @@ jobs:
         EOF
    
   select:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       dists: ${{ steps.select.outputs.dists }}
     steps:
@@ -65,7 +65,6 @@ jobs:
         #echo "dists=$(make pkglist | sed 's/proxysql[_0-9.-]*//g; s/[._].*//; s/dbg-//; s/-clang//' | sort | uniq | jq -Rcs 'split("\n") | .[:-1]')" >> $GITHUB_OUTPUT
 
   build:
-    runs-on: ubuntu-22.04
     needs: [ clean, select ]
     strategy:
       fail-fast: false
@@ -74,6 +73,7 @@ jobs:
 #        dist: [ 'almalinux8','almalinux9','centos7','centos8','centos9','debian10','debian11','debian12','fedora38','fedora39','fedora40','fedora41','opensuse15','ubuntu16','ubuntu18','ubuntu20','ubuntu22','ubuntu24' ]
 #       # v3.0
 #        dist: [ 'almalinux8','almalinux9','centos9','debian12','fedora40','fedora41','opensuse15','ubuntu22','ubuntu24' ]
+        arch: [ 'amd64','arm64' ]
         dist: ${{ fromJson(needs.select.outputs.dists) }}
         type: [ '','-dbg','-clang' ]
         exclude:
@@ -86,10 +86,13 @@ jobs:
             type: '-clang'
           - dist: 'ubuntu18'
             type: '-clang'
+
+    runs-on: ubuntu-24.04${{ matrix.arch == 'arm64' && '-arm' || '' }}
     env:
+      ARCH: ${{ matrix.arch }}
       DIST: ${{ matrix.dist }}
       TYPE: ${{ matrix.type }}
-      MATRIX: '(${{ matrix.dist }},${{ matrix.type }})'
+      MATRIX: '(${{ matrix.arch }},${{ matrix.dist }},${{ matrix.type }})'
 
     steps:
 
@@ -122,7 +125,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        if [[ "${{ matrix.dist }}" = "centos9" ]] && [[ "${{ matrix.type }}" = "" ]]; then
+        if [[ "${{ matrix.dist }}" = "centos9" ]] && [[ "${{ matrix.type }}" = "" ]] && [[ "${{ matrix.arch }}" = "amd64" ]]; then
         gh release edit ${BRANCH}-head --draft --prerelease --repo ${{ github.repository }} --tag ${BRANCH}-head --title "${BRANCH}-head - ${GIT_VERSION}" --notes-file - << EOF
         ## Development Snapshot
         
@@ -166,7 +169,7 @@ jobs:
         details_url: 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
   finalize:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [ build ]
     steps:
     - name: Update release
@@ -188,4 +191,4 @@ jobs:
         [![CI-Package-Build](https://github.com/${{ github.repository }}/actions/workflows/CI-package-build.yml/badge.svg)](https://github.com/${{ github.repository }}/actions/workflows/CI-package-build.yml)
         
         EOF
-        
+
