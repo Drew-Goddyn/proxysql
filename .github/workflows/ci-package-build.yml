@@ -15,27 +15,33 @@ env:
 jobs:
   clean:
     runs-on: ubuntu-24.04
+    outputs:
+      gitdescribe: ${{ steps.gitdescribe.outputs.gitdescribe }}
     steps:
+    
     - name: Git describe
-      id: ghd
-      uses: proudust/gh-describe@v2
-      with:
-#        repo: ${{ github.repository }}
-#        commit-ish: ${{ env.SHA }}
-        commit-ish: ${{ env.BRANCH }}
-  
+      id: gitdescribe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERS=$(gh api repos/${{ github.repository }}/git/refs/tags/${BRANCH#v} | jq -r '.[-1].ref' | sed -e 's|refs/tags/||g')
+        HASH=$(gh api repos/${{ github.repository }}/git/refs/heads/${BRANCH} | jq -r '.object.sha' | cut -c-7)
+        CMTS=$(gh api repos/${{ github.repository }}/compare/${VERS}...${BRANCH} | jq -r '.ahead_by')
+        echo "GIT_VERSION=${VERS}-${CMTS}-g${HASH}" >> $GITHUB_ENV
+        echo "gitdescribe=${VERS}-${CMTS}-g${HASH}" >> $GITHUB_OUTPUT
+    
     - name: Clean packages
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         # gh release delete-asset ${BRANCH}-head
-        gh release delete ${BRANCH}-head --repo ${{ github.repository }} --cleanup-tag || true
-        gh release create ${BRANCH}-head --repo ${{ github.repository }} --title "${BRANCH}-head - ${{ steps.ghd.outputs.describe }}" --target ${{ env.SHA }} --draft --prerelease --notes-file - << EOF
+        gh release delete ${{ env.BRANCH }}-head --repo ${{ github.repository }} --cleanup-tag || true
+        gh release create ${{ env.BRANCH }}-head --repo ${{ github.repository }} --title "${{ env.BRANCH }}-head - ${{ env.GIT_VERSION }}" --target ${{ env.SHA }} --draft --prerelease --notes-file - << EOF
         ## Development Snapshot
         
-        GH-Action Package-Build on ${BRANCH} merge
+        GH-Action Package-Build on ${{ env.BRANCH }} merge
         
-        Version : **${{ steps.ghd.outputs.describe }}**
+        Version : **${{ env.GIT_VERSION }}**
         
         Started : **$(date '+%Y-%m-%d %H:%M:%S %Z')**
         
@@ -50,6 +56,7 @@ jobs:
     outputs:
       dists: ${{ steps.select.outputs.dists }}
     steps:
+    
     - name: Select distros
       id: select
       run: |
@@ -130,6 +137,7 @@ jobs:
        
     - name: Build package
       run: |
+        [[ $(git describe --long --abbrev=7) == ${{ needs.clean.outputs.gitdescribe }} ]] || exit 1
         make ${{ matrix.dist }}${{ matrix.type }}
         echo "BIN_PKG=$(ls -1 binaries/*[mb])" >> $GITHUB_ENV
         echo "BIN_HASH=$(ls -1 binaries/*.id-hash)" >> $GITHUB_ENV
@@ -138,10 +146,9 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # git tag --force -a ${BRANCH}-head -m 'GH-Actions - Development Snapshot Build'
-        # git push origin --tags
-        # gh release upload ${BRANCH}-head --repo ${{ github.repository }} --clobber binaries/proxysql*${{ matrix.dist }}*[mb]
-        gh release upload ${BRANCH}-head --repo ${{ github.repository }} --clobber ${{ env.BIN_PKG }}
+        GIT_VERSION=$(gh release --repo ${{ github.repository }} view ${{ env.BRANCH }}-head | tr -d '*' | grep -Po "(?<=Version : ).*")
+        [[ ${GIT_VERSION} == ${{ needs.clean.outputs.gitdescribe }} ]] || exit 1
+        gh release upload ${{ env.BRANCH }}-head --repo ${{ github.repository }} --clobber ${{ env.BIN_PKG }}
  
     - uses: LouisBrunner/checks-action@v2.0.0
       if: always()
@@ -156,19 +163,20 @@ jobs:
 
   finalize:
     runs-on: ubuntu-24.04
-    needs: [ build ]
+    needs: [ clean, select, build ]
     steps:
     - name: Update release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        GIT_VERSION=$(gh release --repo ${{ github.repository }} view ${BRANCH}-head | tr -d '*' | grep -Po "(?<=Version : ).*")
-        gh release edit ${BRANCH}-head --draft --prerelease --repo ${{ github.repository }} --tag ${BRANCH}-head --notes-file - << EOF
+        GIT_VERSION=$(gh release --repo ${{ github.repository }} view ${{ env.BRANCH }}-head | tr -d '*' | grep -Po "(?<=Version : ).*")
+        [[ ${GIT_VERSION} == ${{ needs.clean.outputs.gitdescribe }} ]] || exit 1
+        gh release edit ${{ env.BRANCH }}-head --draft --prerelease --repo ${{ github.repository }} --tag ${{ env.BRANCH }}-head --notes-file - << EOF
         ## Development Snapshot
         
-        GH-Action Package-Build on ${BRANCH} merge
+        GH-Action Package-Build on ${{ env.BRANCH }} merge
         
-        Version : **${GIT_VERSION}**
+        Version : **${{ needs.clean.outputs.gitdescribe }}**
         
         Finished : **$(date '+%Y-%m-%d %H:%M:%S %Z')**
         
@@ -177,4 +185,5 @@ jobs:
         [![CI-Package-Build](https://github.com/${{ github.repository }}/actions/workflows/CI-package-build.yml/badge.svg)](https://github.com/${{ github.repository }}/actions/workflows/CI-package-build.yml)
         
         EOF
+        
         
