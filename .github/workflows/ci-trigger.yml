@@ -14,18 +14,19 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set +e
-        set -x
+        #set -x
 
-        echo "Get run id: '${{ github.ref_name }} ${{ github.workflow }} ${{ github.sha }}'"
+        RUNNAME="${{ github.head_ref || github.ref_name }} CI-builds ${{ github.event.after || github.sha }}"
+        echo "Get run id: '${RUNNAME}' ..."
         sleep 5
-        RUNID=$(gh -R ${{ github.repository }} run list -w CI-builds -s in_progress | grep '${{ github.ref_name }} CI-builds ${{ github.sha }}' | grep -Po '(?<=workflow_run)\s+\d+')
+        RUNID=$(gh -R ${{ github.repository }} run list -w CI-builds -s in_progress | grep "${RUNNAME}" | grep -Po '(?<=workflow_run)\s+\d+')
         while [[ -z ${RUNID} ]]; do
           sleep 5
-          RUNID=$(gh -R ${{ github.repository }} run list -w CI-builds -s in_progress | grep '${{ github.ref_name }} CI-builds ${{ github.sha }}' | grep -Po '(?<=workflow_run)\s+\d+')
+          RUNID=$(gh -R ${{ github.repository }} run list -w CI-builds -s in_progress | grep "${RUNNAME}" | grep -Po '(?<=workflow_run)\s+\d+')
         done
-        echo "Run id: '${RUNID}' : '${{ github.ref_name }} ${{ github.workflow }} ${{ github.sha }}'"
+        echo "Got run id: '${RUNNAME}' : '${RUNID}'"
         
-        echo "Trigger workflow_run[in_progress]: '${{ github.ref_name }} ${{ github.workflow }} ${{ github.sha }}'"
+        echo "Trigger workflow_run[in_progress]: '${RUNNAME}'"
         sleep 5
         # this blocks until the run is finished
         gh -R ${{ github.repository }} run watch -i 30 ${RUNID} >/dev/null
