@@ -56,6 +56,8 @@ using json = nlohmann::json;
 #define SELECT_VARIABLE_IDENTITY_LEN 17
 #define SELECT_VARIABLE_IDENTITY_LIMIT1 "SELECT @@IDENTITY LIMIT 1"
 #define SELECT_VARIABLE_IDENTITY_LIMIT1_LEN 25
+#define SELECT_AUTO_COMMIT "SELECT @@AUTOCOMMIT"
+#define SELECT_AUTO_COMMIT_LEN 19
 
 #define EXPMARIA
 
@@ -6804,6 +6806,49 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 			// as a precaution, we reset cache_ttl
 			qpo->cache_ttl = 0;
 		}
+	}
+
+	// handle case, about SELECT_AUTO_COMMIT
+	if (pkt->size==SELECT_AUTO_COMMIT_LEN+5 && *((char *)(pkt->ptr)+4)==(char)0x03 && strncasecmp((char *)SELECT_AUTO_COMMIT,(char *)pkt->ptr+5,pkt->size-5)==0) {
+		char buf[32];
+		sprintf(buf, "%s", autocommit ? "1" : "0");
+		char buf2[32];
+		int l0=0;
+		l0 = strlen(SELECT_AUTO_COMMIT);
+		memcpy(buf2, (char *)pkt->ptr + 5, l0);
+		buf2[l0]=0;
+		unsigned int nTrx=NumActiveTransactions();
+		uint16_t setStatus = (nTrx ? SERVER_STATUS_IN_TRANS : 0 );
+		if (autocommit) setStatus |= SERVER_STATUS_AUTOCOMMIT;
+		MySQL_Data_Stream *myds=client_myds;
+		MySQL_Protocol *myprot=&client_myds->myprot;
+		myds->DSS=STATE_QUERY_SENT_DS;
+		int sid=1;
+		myprot->generate_pkt_column_count(true,NULL,NULL,sid,1); sid++;
+		myprot->generate_pkt_field(true,NULL,NULL,sid,(char *)"",(char *)"",(char *)"",buf2,(char *)"",63,31,MYSQL_TYPE_LONGLONG,161,0,false,0,NULL); sid++;
+		myds->DSS=STATE_COLUMN_DEFINITION;
+
+		bool deprecate_eof_active = myds->myconn->options.client_flag & CLIENT_DEPRECATE_EOF;
+		if (!deprecate_eof_active) {
+			myprot->generate_pkt_EOF(true,NULL,NULL,sid,0, setStatus); sid++;
+		}
+		char **p=(char **)malloc(sizeof(char*)*1);
+		unsigned long *l=(unsigned long *)malloc(sizeof(unsigned long *)*1);
+		l[0]=strlen(buf);
+		p[0]=buf;
+		myprot->generate_pkt_row(true,NULL,NULL,sid,1,l,p); sid++;
+		myds->DSS=STATE_ROW;
+		if (deprecate_eof_active) {
+			myprot->generate_pkt_OK(true,NULL,NULL,sid,0,0,setStatus,0,NULL,true); sid++;
+		} else {
+			myprot->generate_pkt_EOF(true,NULL,NULL,sid,0, setStatus); sid++;
+		}
+		myds->DSS=STATE_SLEEP;
+		RequestEnd(NULL);
+		l_free(pkt->size,pkt->ptr);
+		free(p);
+		free(l);
+		return true;
 	}
 
 	// handle command KILL #860
