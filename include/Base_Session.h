@@ -82,6 +82,7 @@ class Base_Session {
 	int pending_connect;
 	enum proxysql_session_type session_type;
 	int warning_in_hg;
+	int wait_timeout;   //in milliseconds
 
 	// bool
 	bool autocommit;

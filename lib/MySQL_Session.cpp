@@ -681,6 +681,7 @@ MySQL_Session::MySQL_Session() {
 	last_HG_affected_rows = -1; // #1421 : advanced support for LAST_INSERT_ID()
 	proxysql_node_address = NULL;
 	use_ldap_auth = false;
+	wait_timeout = mysql_thread___wait_timeout;
 }
 
 /**
@@ -6414,6 +6415,22 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection charset to %d\n", c->nr);
 							client_myds->myconn->set_charset(c->nr, NAMES);
 						}
+					} else if (var == "wait_timeout") {
+						std::string value = *values++;
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Client requested SET wait_timeout = %s\n", value.c_str());
+					
+						int client_timeout = atoi(value.c_str()) * 1000; // converting into milliseconds, mysql set timeout is in second
+				
+						if (client_timeout <= 0 || client_timeout > mysql_thread___wait_timeout) {
+							char errmsg[128];
+							snprintf(errmsg, sizeof(errmsg), "wait_timeout is less/equal than 0 or wait_timeout is %d exceeds maximum allowed %d", client_timeout, mysql_thread___wait_timeout);
+							client_myds->DSS = STATE_QUERY_SENT_NET;
+							client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1231, (char *)"42000", errmsg, true);
+							client_myds->DSS = STATE_SLEEP;
+							status = WAITING_CLIENT_DATA;
+							return true;
+						}
+						wait_timeout = client_timeout;
 					} else if (var == "tx_isolation") {
 						std::string value1 = *values;
 						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing SET tx_isolation value %s\n", value1.c_str());
