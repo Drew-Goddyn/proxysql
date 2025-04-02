@@ -61,7 +61,6 @@ using json = nlohmann::json;
 #define SELECT_MYSQL_VERSION_FUNC "SELECT VERSION()"
 #define SELECT_MYSQL_VERSION_FUNC_LEN 16
 
-#define BACKEND_SERVER_VERSION "8.0.0"
 
 #define EXPMARIA
 
@@ -6816,7 +6815,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 	if ((pkt->size==SELECT_MYSQL_VERSION_LEN+5 && *((char *)(pkt->ptr)+4)==(char)0x03 && strncasecmp((char *)SELECT_MYSQL_VERSION,(char *)pkt->ptr+5,pkt->size-5)==0) ||
 		(pkt->size==SELECT_MYSQL_VERSION_FUNC_LEN+5 && *((char *)(pkt->ptr)+4)==(char)0x03 && strncasecmp((char *)SELECT_MYSQL_VERSION_FUNC,(char *)pkt->ptr+5,pkt->size-5)==0)) {
 		char buf[32];
-		sprintf(buf, "%s", BACKEND_SERVER_VERSION);
+		sprintf(buf, "%s", mysql_thread___server_version);
 		char buf2[32];
 		int l0=0;
 		if (pkt->size == SELECT_MYSQL_VERSION_LEN+5)
