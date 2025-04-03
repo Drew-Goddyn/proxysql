@@ -6814,8 +6814,6 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 	// handle case, about SELECT_MYSQL_VERSION or SELECT VERSION()
 	if ((pkt->size==SELECT_MYSQL_VERSION_LEN+5 && *((char *)(pkt->ptr)+4)==(char)0x03 && strncasecmp((char *)SELECT_MYSQL_VERSION,(char *)pkt->ptr+5,pkt->size-5)==0) ||
 		(pkt->size==SELECT_MYSQL_VERSION_FUNC_LEN+5 && *((char *)(pkt->ptr)+4)==(char)0x03 && strncasecmp((char *)SELECT_MYSQL_VERSION_FUNC,(char *)pkt->ptr+5,pkt->size-5)==0)) {
-		char buf[32];
-		sprintf(buf, "%s", mysql_thread___server_version);
 		char buf2[32];
 		int l0=0;
 		if (pkt->size == SELECT_MYSQL_VERSION_LEN+5)
@@ -6841,8 +6839,8 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 		}
 		char **p=(char **)malloc(sizeof(char*)*1);
 		unsigned long *l=(unsigned long *)malloc(sizeof(unsigned long *)*1);
-		l[0]=strlen(buf);
-		p[0]=buf;
+		l[0]= strlen(mysql_thread___server_version);
+		p[0]=mysql_thread___server_version;
 		myprot->generate_pkt_row(true,NULL,NULL,sid,1,l,p); sid++;
 		myds->DSS=STATE_ROW;
 		if (deprecate_eof_active) {
