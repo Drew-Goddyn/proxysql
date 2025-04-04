@@ -3790,7 +3790,12 @@ void MySQL_Thread::ProcessAllSessions_MaintenanceLoop(MySQL_Session *sess, unsig
 	 * @param curtime The current time, in milliseconds.
 	 * @param sess The MySQL session to handle.
 	 */
-	if ( (sess_time/1000 > (unsigned long long)mysql_thread___max_transaction_idle_time) || (sess_time/1000 > (unsigned long long)sess->wait_timeout) ) {
+	unsigned long long effective_wait_timeout = std::min(
+		static_cast<unsigned long long>(mysql_thread___wait_timeout),
+		static_cast<unsigned long long>(sess->wait_timeout)
+	);
+	if ((sess_time/1000 > static_cast<unsigned long long>(mysql_thread___max_transaction_idle_time)) ||
+	    (sess_time/1000 > effective_wait_timeout)) {
 		//numTrx = sess->NumActiveTransactions();
 		numTrx = sess->active_transactions;
 		if (numTrx) {

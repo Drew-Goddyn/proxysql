@@ -6416,21 +6416,53 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 							client_myds->myconn->set_charset(c->nr, NAMES);
 						}
 					} else if (var == "wait_timeout") {
+						// MySQL min allowed value, 1 second in milliseconds
+						const unsigned long long MYSQL_WAIT_TIMEOUT_MIN_MS = 1 * 1000;
+						// MySQL max allowed value, 365 days in milliseconds
+						const unsigned long long MYSQL_WAIT_TIMEOUT_MAX_MS = 31536000ULL * 1000;
+
 						std::string value = *values++;
 						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Client requested SET wait_timeout = %s\n", value.c_str());
-					
-						int client_timeout = atoi(value.c_str()) * 1000; // converting into milliseconds, mysql set timeout is in second
-				
-						if (client_timeout <= 0 || client_timeout > mysql_thread___wait_timeout) {
+
+						unsigned long long client_timeout = 0;
+						try {
+							client_timeout = std::stoull(value) * 1000;
+						} catch (const std::exception& e) {
 							char errmsg[128];
-							snprintf(errmsg, sizeof(errmsg), "wait_timeout is less/equal than 0 or wait_timeout is %d exceeds maximum allowed %d", client_timeout, mysql_thread___wait_timeout);
+							snprintf(errmsg, sizeof(errmsg),
+									 "Incorrect argument type wait_timeout value: %s", value.c_str());
 							client_myds->DSS = STATE_QUERY_SENT_NET;
-							client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1231, (char *)"42000", errmsg, true);
+							client_myds->myprot.generate_pkt_ERR(true, nullptr, nullptr, 1, 1231, (char *)"42000", errmsg, true);
 							client_myds->DSS = STATE_SLEEP;
 							status = WAITING_CLIENT_DATA;
 							return true;
 						}
+
+						auto is_within_range = [](unsigned long long val, unsigned long long min, unsigned long long max) {
+							return val >= min && val <= max;
+						};
+
+						// Enforcing min/max MySQL wait_timeout range
+						if (!is_within_range(client_timeout, MYSQL_WAIT_TIMEOUT_MIN_MS, MYSQL_WAIT_TIMEOUT_MAX_MS)) {
+							char errmsg[256];
+							snprintf(errmsg, sizeof(errmsg),
+									 "wait_timeout must be between %llu ms (1s) and %llu ms (365d), received: %llu ms",
+									 MYSQL_WAIT_TIMEOUT_MIN_MS, MYSQL_WAIT_TIMEOUT_MAX_MS, client_timeout);
+							client_myds->DSS = STATE_QUERY_SENT_NET;
+							client_myds->myprot.generate_pkt_ERR(true, nullptr, nullptr, 1, 1231, (char *)"42000", errmsg, true);
+							client_myds->DSS = STATE_SLEEP;
+							status = WAITING_CLIENT_DATA;
+							return true;
+						}
+
+						// Warn if client's value exceeds current global timeout
+						if (client_timeout > mysql_thread___wait_timeout) {
+							proxy_error("[Warning] Client-specified wait_timeout (%llu ms) exceeds global mysql-wait_timeout (%llu ms). Global timeout will still be enforced.",
+										client_timeout, mysql_thread___wait_timeout);
+						}
+
 						wait_timeout = client_timeout;
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection wait_timeout to %llu ms\n", client_timeout);
 					} else if (var == "tx_isolation") {
 						std::string value1 = *values;
 						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing SET tx_isolation value %s\n", value1.c_str());
