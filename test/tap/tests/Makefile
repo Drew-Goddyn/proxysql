@@ -213,6 +213,14 @@ tests: tests-cpp \
 	reg_test_3504-change_user_libmysql_helper \
 	mysql_reconnect_libmariadb-t \
 	mysql_reconnect_libmysql-t \
+	test_match_eof_conn_cap_libmysql-t \
+	test_match_eof_conn_cap_libmariadb-t \
+	test_sqlite3_special_queries_libmariadb-t \
+	test_sqlite3_special_queries_libmysql-t \
+	test_ssl_fast_forward-2_libmariadb-t \
+	test_ssl_fast_forward-2_libmysql-t \
+	test_ssl_fast_forward-3_libmariadb-t \
+	test_ssl_fast_forward-3_libmysql-t \
 	setparser_test2 setparser_test2-t \
 	setparser_test3 setparser_test3-t \
 	set_testing-240.csv \
@@ -287,7 +295,7 @@ test_mysql_query_digests_stages-t: test_mysql_query_digests_stages-t.cpp $(TAP_L
 	$(CXX) $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) -o $@
 
 sqlite3-t: sqlite3-t.cpp $(TAP_LDIR)/libtap.so
-	$(CXX) $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
+	$(CXX) $< -DEXCLUDE_TRACKING_VARAIABLES $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
 
 test_gtid_forwarding-t: test_gtid_forwarding-t.cpp $(TAP_LDIR)/libtap.so
 	$(CXX) $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) -o $@
@@ -298,20 +306,20 @@ test_admin_prometheus_metrics_dump-t: test_admin_prometheus_metrics_dump-t.cpp $
 create_connection_annotation: test_connection_annotation-t.cpp $(TAP_LDIR)/libtap.so
 	$(CXX) -DTEST_AURORA $< $(IDIRS) $(LDIRS) $(OPT) $(OBJ) $(MYLIBS) $(STATIC_LIBS) -o $@
 
-setparser_test: setparser_test.cpp $(TAP_LDIR)/libtap.so $(RE2_PATH)/util/test.cc $(PROXYSQL_LDIR)/set_parser.cpp $(LIBPROXYSQLAR) $(LIBCOREDUMPERAR)
-	$(CXX) $< $(RE2_PATH)/util/test.cc $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
+setparser_test: setparser_test.cpp $(TAP_LDIR)/libtap.so $(RE2_PATH)/util/test.cc $(PROXYSQL_LDIR)/MySQL_Set_Stmt_Parser.cpp $(LIBPROXYSQLAR) $(LIBCOREDUMPERAR)
+	$(CXX) $< -DEXCLUDE_TRACKING_VARAIABLES $(RE2_PATH)/util/test.cc $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
 
 setparser_test2-t: setparser_test2
 	ln -fs setparser_test2 setparser_test2-t
 
-setparser_test2: setparser_test2.cpp $(TAP_LDIR)/libtap.so $(PROXYSQL_LDIR)/set_parser.cpp setparser_test_common.h $(LIBPROXYSQLAR) $(LIBCOREDUMPERAR)
-	$(CXX) $< $(PROXYSQL_LDIR)/set_parser.cpp $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
+setparser_test2: setparser_test2.cpp $(TAP_LDIR)/libtap.so $(PROXYSQL_LDIR)/MySQL_Set_Stmt_Parser.cpp setparser_test_common.h $(LIBPROXYSQLAR) $(LIBCOREDUMPERAR)
+	$(CXX) $<  -DEXCLUDE_TRACKING_VARAIABLES $(PROXYSQL_LDIR)/MySQL_Set_Stmt_Parser.cpp $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
 
 setparser_test3-t: setparser_test3
 	ln -fs setparser_test3 setparser_test3-t
 
-setparser_test3: setparser_test3.cpp $(TAP_LDIR)/libtap.so $(PROXYSQL_LDIR)/set_parser.cpp setparser_test_common.h $(LIBPROXYSQLAR) $(LIBCOREDUMPERAR)
-	$(CXX) -DPARSERDEBUG $< $(PROXYSQL_LDIR)/set_parser.cpp $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
+setparser_test3: setparser_test3.cpp $(TAP_LDIR)/libtap.so $(PROXYSQL_LDIR)/MySQL_Set_Stmt_Parser.cpp setparser_test_common.h $(LIBPROXYSQLAR) $(LIBCOREDUMPERAR)
+	$(CXX) $< -DEXCLUDE_TRACKING_VARAIABLES -DPARSERDEBUG $(PROXYSQL_LDIR)/MySQL_Set_Stmt_Parser.cpp $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(LIBCOREDUMPERAR) -o $@
 
 reg_test_3504-change_user_libmariadb_helper: reg_test_3504-change_user_helper.cpp $(TAP_LDIR)/libtap.so
 	$(CXX) -DDISABLE_WARNING_COUNT_LOGGING $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(STATIC_LIBS) -o $@
@@ -330,6 +338,24 @@ test_match_eof_conn_cap_libmysql-t: test_match_eof_conn_cap.cpp $(TAP_LDIR)/libt
 
 test_match_eof_conn_cap_libmariadb-t: test_match_eof_conn_cap.cpp $(TAP_LDIR)/libtap_mysql8.a
 	$(CXX) -DDISABLE_WARNING_COUNT_LOGGING $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(STATIC_LIBS) -o $@
+
+test_sqlite3_special_queries_libmariadb-t: test_sqlite3_special_queries.cpp $(TAP_LDIR)/libtap.so
+	$(CXX) -DDISABLE_WARNING_COUNT_LOGGING $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(STATIC_LIBS) -o $@
+
+test_sqlite3_special_queries_libmysql-t: test_sqlite3_special_queries.cpp $(TAP_LDIR)/libtap_mysql8.a
+	$(CXX) -DLIBMYSQL_HELPER8 -DDISABLE_WARNING_COUNT_LOGGING $< -I$(TEST_MYSQL8_IDIR) -I$(TEST_MYSQL8_EDIR) -L$(TEST_MYSQL8_LDIR) -lmysqlclient -ltap_mysql8 -lresolv $(CUSTOMARGS) -o $@
+
+test_ssl_fast_forward-2_libmariadb-t: test_ssl_fast_forward-2.cpp $(TAP_LDIR)/libtap.so
+	$(CXX) -DDISABLE_WARNING_COUNT_LOGGING $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(STATIC_LIBS) -o $@
+
+test_ssl_fast_forward-2_libmysql-t: test_ssl_fast_forward-2.cpp $(TAP_LDIR)/libtap_mysql8.a
+	$(CXX) -DLIBMYSQL_HELPER8 -DDISABLE_WARNING_COUNT_LOGGING $< -I$(TEST_MYSQL8_IDIR) -I$(TEST_MYSQL8_EDIR) -L$(TEST_MYSQL8_LDIR) -lmysqlclient -ltap_mysql8 -lresolv $(CUSTOMARGS) -o $@
+
+test_ssl_fast_forward-3_libmariadb-t: test_ssl_fast_forward-3.cpp $(TAP_LDIR)/libtap.so
+	$(CXX) -DDISABLE_WARNING_COUNT_LOGGING $< $(IDIRS) $(LDIRS) $(OPT) $(MYLIBS) $(STATIC_LIBS) -o $@
+
+test_ssl_fast_forward-3_libmysql-t: test_ssl_fast_forward-3.cpp $(TAP_LDIR)/libtap_mysql8.a
+	$(CXX) -DLIBMYSQL_HELPER8 -DDISABLE_WARNING_COUNT_LOGGING $< -I$(TEST_MYSQL8_IDIR) -I$(TEST_MYSQL8_EDIR) -L$(TEST_MYSQL8_LDIR) -lmysqlclient -ltap_mysql8 -lresolv $(CUSTOMARGS) -o $@
 
 test_clickhouse_server_libmysql-t: test_clickhouse_server-t.cpp $(TAP_LDIR)/libtap.so
 	$(CXX) -DLIBMYSQL_HELPER -DDISABLE_WARNING_COUNT_LOGGING $< -I$(TEST_MYSQL_IDIR) -I$(TEST_MYSQL_EDIR) -L$(TEST_MYSQL_LDIR) -lmysqlclient -ltap_mysql57 $(CUSTOMARGS) -o $@

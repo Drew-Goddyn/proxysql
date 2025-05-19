@@ -12,6 +12,10 @@ services:
       - CURVER
       - PKG_RELEASE
       - PROXYSQL_BUILD_TYPE
+      - WITHGCOV
+      - NOJEMALLOC
+      - WITHASAN
+      - BLD_NAME
     command: bash -l -c /opt/entrypoint/entrypoint.bash
 
 ####################################################################################################

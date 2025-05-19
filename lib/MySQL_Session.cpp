@@ -657,6 +657,7 @@ MySQL_Session::MySQL_Session() {
 
 	current_hostgroup=-1;
 	default_hostgroup=-1;
+	previous_hostgroup=-1;
 	locked_on_hostgroup=-1;
 	locked_on_hostgroup_and_all_variables_set=false;
 	next_query_flagIN=-1;
@@ -1089,6 +1090,7 @@ void MySQL_Session::generate_proxysql_internal_session_json(json &j) {
 	j["default_schema"] = ( default_schema ? default_schema : "" );
 	j["user_attributes"] = ( user_attributes ? user_attributes : "" );
 	j["transaction_persistent"] = transaction_persistent;
+	j["fast_forward"] = session_fast_forward;
 	if (client_myds != NULL) { // only if client_myds is defined
 		client_myds->get_client_myds_info_json(j);
 	}
@@ -1396,9 +1398,11 @@ bool MySQL_Session::handler_special_queries(PtrSize_t *pkt) {
 	if ( (pkt->size >= 22 + 5) && (strncasecmp((char *)"LOAD DATA LOCAL INFILE",(char *)pkt->ptr+5, 22)==0) ) {
 		if (mysql_thread___enable_load_data_local_infile == false) {
 			client_myds->DSS=STATE_QUERY_SENT_NET;
-			client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,1047,(char *)"HY000",(char *)"Unsupported 'LOAD DATA LOCAL INFILE' command",true);
+			string errmsg = "Unsupported 'LOAD DATA LOCAL INFILE' command";
+			client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,1047,(char *)"08S01", errmsg.c_str(), true);
 			if (mirror==false) {
-				RequestEnd(NULL);
+				MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 1047, (char *)errmsg.c_str());
+				RequestEnd(NULL, 1047, errmsg.c_str());
 			} else {
 				client_myds->DSS=STATE_SLEEP;
 				status=WAITING_CLIENT_DATA;
@@ -2784,9 +2788,7 @@ bool MySQL_Session::handler_again___status_CHANGING_SCHEMA(int *_rc) {
 	return false;
 }
 
-
 bool MySQL_Session::handler_again___status_CONNECTING_SERVER(int *_rc) {
-	//fprintf(stderr,"CONNECTING_SERVER\n");
 	unsigned long long curtime=monotonic_time();
 	thread->atomic_curtime=curtime;
 	if (mirror) {
@@ -2813,7 +2815,8 @@ bool MySQL_Session::handler_again___status_CONNECTING_SERVER(int *_rc) {
 				thread->status_variables.stvar[st_var_max_connect_timeout_err]++;
 			}
 			client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,9001,(char *)"HY000", errmsg.c_str(), true);
-			RequestEnd(mybe->server_myds);
+			MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 9001, (char *)errmsg.c_str());
+			RequestEnd(mybe->server_myds, 9001, errmsg.c_str());
 
 			string hg_status {};
 			generate_status_one_hostgroup(current_hostgroup, hg_status);
@@ -2895,7 +2898,69 @@ bool MySQL_Session::handler_again___status_CONNECTING_SERVER(int *_rc) {
 				st=previous_status.top();
 				previous_status.pop();
 				myds->wait_until=0;
-				if (session_fast_forward) {
+
+				// NOTE: Even if a connection has correctly been created, since the CLIENT_DEPRECATE_EOF
+				// capability isn't always enforced to match for backend conns (no direct propagation), a
+				// mismatch can take place after the creation. Right now this is only true for
+				// 'CLIENT_DEPRECATE_EOF' since the other capabilities are propagated from client.
+				if (!client_myds->myconn->match_ff_req_options(mybe->server_myds->myconn)) {
+					if (myds->connect_retries_on_failure > 0) {
+						proxy_info(
+							"Failed to obtain suitable connection for fast-forward; server lacks the required capabilities"
+								"   hostgroup=%d client_flags=%u server_capabilities=%lu\n",
+							current_hostgroup,
+							client_myds->myconn->options.client_flag,
+							mybe->server_myds->myconn->mysql->server_capabilities
+						);
+
+						const MySrvC* parent { myconn->parent };
+						MyHGM->p_update_mysql_error_counter(
+							p_mysql_error_type::proxysql, parent->myhgc->hid, parent->address, parent->port,
+							ER_PROXYSQL_FAST_FORWARD_CONN_CREATE
+						);
+						myds->connect_retries_on_failure--;
+						myds->destroy_MySQL_Connection_From_Pool(false);
+
+						// We are still in 'FAST_FORWARD' and we require a new connection, since we are
+						// moving to 'CONNECTING_SERVER' the previous status shouldn't be consumed.
+						previous_status.push(st);
+
+						// NOTE-connect_retries_delay: In case of failure to connect, if
+						// 'mysql_thread___connect_retries_delay' is set, we impose a delay in the session
+						// processing via 'pause_until'. Complementary NOTE above.
+						if (mysql_thread___connect_retries_delay) {
+							pause_until = thread->curtime + mysql_thread___connect_retries_delay*1000;
+							set_status(CONNECTING_SERVER);
+
+							return false;
+						}
+
+						NEXT_IMMEDIATE_NEW(CONNECTING_SERVER);
+					} else {
+						char buf[256] = { 0 };
+						cstr_format(buf,
+							"Fast-forward connection attempt failed; server lacks the required capabilities"
+								"   hostgroup=%d client_flags=%u server_capabilities=%lu\n",
+							current_hostgroup,
+							client_myds->myconn->options.client_flag,
+							mybe->server_myds->myconn->mysql->server_capabilities
+						);
+
+						client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1815, (char *)"HY000", buf, true);
+
+						while (previous_status.size()) {
+							st=previous_status.top();
+							previous_status.pop();
+						}
+
+						myds->destroy_MySQL_Connection_From_Pool(true);
+						myds->max_connect_time=0;
+
+						NEXT_IMMEDIATE_NEW(WAITING_CLIENT_DATA);
+					}
+				}
+
+				if (session_fast_forward==true) {
 					// we have a successful connection and session_fast_forward enabled
 					// set DSS=STATE_SLEEP or it will believe it have to use MARIADB client library
 					myds->DSS=STATE_SLEEP;
@@ -2946,21 +3011,23 @@ bool MySQL_Session::handler_again___status_CONNECTING_SERVER(int *_rc) {
 				} else {
 __exit_handler_again___status_CONNECTING_SERVER_with_err:
 					int myerr=mysql_errno(myconn->mysql);
+					string errmsg = "";
 					if (myerr) {
 						char sqlstate[10];
+						errmsg = string(mysql_error(myconn->mysql));
 						sprintf(sqlstate,"%s",mysql_sqlstate(myconn->mysql));
-						client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,mysql_errno(myconn->mysql),sqlstate,mysql_error(myconn->mysql),true);
+						client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,mysql_errno(myconn->mysql),sqlstate, errmsg.c_str(), true);
 					} else {
-						char buf[256];
-						sprintf(buf,"Max connect failure while reaching hostgroup %d", current_hostgroup);
-						client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,9002,(char *)"HY000",buf,true);
+						errmsg = "Max connect failure while reaching hostgroup " + to_string(current_hostgroup);
+						client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,9002,(char *)"HY000", errmsg.c_str(), true);
 						if (thread) {
 							thread->status_variables.stvar[st_var_max_connect_timeout_err]++;
 						}
 					}
 					if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
 						// see bug #979
-						RequestEnd(myds);
+						MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 9002, (char *)errmsg.c_str());
+						RequestEnd(myds, 9002, errmsg.c_str());
 					}
 					while (previous_status.size()) {
 						st=previous_status.top();
@@ -3222,7 +3289,7 @@ void MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					sprintf(buf, err_msg, current_hostgroup, locked_on_hostgroup, nqn.c_str(), end);
 					client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,9005,(char *)"HY000",buf, true);
 					thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-					RequestEnd(NULL);
+					RequestEnd(NULL, 9005, buf);
 					free(buf);
 					l_free(pkt.size,pkt.ptr);
 					return;
@@ -3395,7 +3462,7 @@ void MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					sprintf(buf, err_msg, current_hostgroup, locked_on_hostgroup, nqn.c_str(), end);
 					client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,9005,(char *)"HY000",buf, true);
 					thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-					RequestEnd(NULL);
+					RequestEnd(NULL, 9005, buf);
 					free(buf);
 					l_free(pkt.size,pkt.ptr);
 					return;
@@ -3798,7 +3865,16 @@ void MySQL_Session::GPFC_PreparedStatements(PtrSize_t& pkt, unsigned char c) {
 	}
 }
 
-void MySQL_Session::GPFC_Replication_SwitchToFastForward(PtrSize_t& pkt, unsigned char c) {
+int MySQL_Session::GPFC_Replication_SwitchToFastForward(PtrSize_t& pkt, unsigned char c) {
+	if (session_type != PROXYSQL_SESSION_MYSQL) { // only MySQL module supports replication!!
+		l_free(pkt.size,pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,1045,(char *)"28000",(char *)"Command not supported");
+		client_myds->DSS=STATE_SLEEP;
+		status=WAITING_CLIENT_DATA;
+		return 0;
+	}
+
 	// In this switch we handle commands that download binlog events from MySQL
 	// servers. For these commands a lot of the features provided by ProxySQL
 	// aren't useful, like multiplexing, query parsing, etc. For this reason,
@@ -3844,6 +3920,7 @@ void MySQL_Session::GPFC_Replication_SwitchToFastForward(PtrSize_t& pkt, unsigne
 	// We reinitialize the 'wait_until' since this session shouldn't wait for processing as
 	// we are now transitioning to 'FAST_FORWARD'.
 	mybe->server_myds->wait_until = 0;
+
 	if (mybe->server_myds->DSS==STATE_NOT_INITIALIZED) {
 		// NOTE: This section is entirely borrowed from 'STATE_SLEEP' for 'session_fast_forward'.
 		// Check comments there for extra information.
@@ -3862,6 +3939,30 @@ void MySQL_Session::GPFC_Replication_SwitchToFastForward(PtrSize_t& pkt, unsigne
 		previous_status.push(FAST_FORWARD); // next status will be FAST_FORWARD
 		set_status(CONNECTING_SERVER); // now we need a connection
 	} else {
+		bool match_tracked {
+			// If DSS **IS** initialized, we **MUST** have a connection
+			mybe->server_myds->DSS != STATE_NOT_INITIALIZED
+			// Due to the first condition it's safe check the conn tracked options. Matching capabilities are
+			// mandatory for fast-forward transitions, otherwise session should be terminated.
+			&& client_myds->myconn->match_ff_req_options(mybe->server_myds->myconn)
+		};
+
+		// If a connection has been already acquired, but it doesn't match the required capabilities, the
+		// mismatch should be reported, and session should be killed.
+		if (!match_tracked) {
+			proxy_info(
+				"Failed to switch to fast-forward; session connection lacks the required capabilities"
+				"   hostgroup=%d client_flags=%u server_capabilities=%lu\n",
+				current_hostgroup,
+				client_myds->myconn->options.client_flag,
+				mybe->server_myds->myconn->mysql->server_capabilities
+			);
+			mybe->server_myds->destroy_MySQL_Connection_From_Pool(false);
+			mybe->server_myds->fd=0;
+
+			return -1;
+		}
+
 		// In case of having a connection, we need to make user to reset the state machine
 		// for current server 'MySQL_Data_Stream', setting it outside of any state handled
 		// by 'mariadb' library. Otherwise 'MySQL_Thread' will threat this
@@ -3896,6 +3997,8 @@ void MySQL_Session::GPFC_Replication_SwitchToFastForward(PtrSize_t& pkt, unsigne
 		}
 		set_status(FAST_FORWARD); // we can set status to FAST_FORWARD
 	}	
+
+	return 0;
 }
 
 bool MySQL_Session::GPFC_QueryUSE(PtrSize_t& pkt, int& handler_ret) {
@@ -4042,6 +4145,17 @@ __get_pkts_from_client:
 						}
 						switch ((enum_mysql_command)c) {
 							case _MYSQL_COM_QUERY:
+								{
+									const char* schemaname { client_myds->myconn->userinfo->schemaname };
+									const char* recv_query { static_cast<char*>(pkt.ptr) + 5 };
+									const uint32_t recv_query_sz { pkt.size - 5 };
+
+									proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing received query"
+										"   session=%p session_type=%d schemaname=\"%s\" query=\"%.*s\"\n",
+										this, session_type, schemaname ? schemaname : "", recv_query_sz, recv_query
+									);
+								}
+
 								__sync_add_and_fetch(&thread->status_variables.stvar[st_var_queries],1);
 								if (session_type == PROXYSQL_SESSION_MYSQL) {
 									bool rc_break=false;
@@ -4142,7 +4256,7 @@ __get_pkts_from_client:
 												sprintf(buf, err_msg, current_hostgroup, locked_on_hostgroup, nqn.c_str(), end);
 												client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,9005,(char *)"HY000",buf, true);
 												thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-												RequestEnd(NULL);
+												RequestEnd(NULL, 9005, buf);
 												free(buf);
 												l_free(pkt.size,pkt.ptr);
 												break;
@@ -4201,7 +4315,8 @@ __get_pkts_from_client:
 							case _MYSQL_COM_BINLOG_DUMP:
 							case _MYSQL_COM_BINLOG_DUMP_GTID:
 							case _MYSQL_COM_REGISTER_SLAVE:
-								GPFC_Replication_SwitchToFastForward(pkt, c);
+								handler_ret = GPFC_Replication_SwitchToFastForward(pkt, c);
+								if (handler_ret) { return handler_ret; }
 								break;
 							case _MYSQL_COM_QUIT:
 								proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Got COM_QUIT packet\n");
@@ -4849,7 +4964,6 @@ handler_again:
 		case PROCESSING_STMT_PREPARE:
 		case PROCESSING_STMT_EXECUTE:
 		case PROCESSING_QUERY:
-			//fprintf(stderr,"PROCESSING_QUERY\n");
 			// Pause Check
 			// It checks if pause_until is greater than the current time (thread->curtime).
 			// If so, it returns handler_ret immediately, indicating that processing should be paused until a later time.
@@ -5093,7 +5207,7 @@ handler_again:
 								return handler_ret;
 							}
 							handler_minus1_GenerateErrorMessage(myds, myconn, wrong_pass);
-							RequestEnd(myds);
+							RequestEnd(myds, myerr);
 							handler_minus1_HandleBackendConnection(myds, myconn);
 						}
 					} else {
@@ -5168,8 +5282,6 @@ handler_again:
 				int rc=0;
 				if (handler_again___status_CONNECTING_SERVER(&rc))
 					goto handler_again;	// we changed status
-				//if (rc==1) //handler_again___status_CONNECTING_SERVER returns 1
-				//	goto __exit_DSS__STATE_NOT_INITIALIZED;
 			}
 			break;
 		case session_status___NONE:
@@ -5231,6 +5343,7 @@ bool MySQL_Session::handler_again___status_SHOW_WARNINGS(MySQL_Data_Stream* myds
 		myds->revents,(char *)"SHOW WARNINGS", strlen((char *)"SHOW WARNINGS")
 	);
 	if (rc == 0 || rc == -1) {
+		int myerr = 0;
 		// Cleanup the connection resulset from 'SHOW WARNINGS' for the next query.
 		if (myconn->MyRS != NULL) {
 			delete myconn->MyRS;
@@ -5238,13 +5351,13 @@ bool MySQL_Session::handler_again___status_SHOW_WARNINGS(MySQL_Data_Stream* myds
 		}
 
 		if (rc == -1) {
-			int myerr = mysql_errno(myconn->mysql);
+			myerr = mysql_errno(myconn->mysql);
 			proxy_error(
 				"'SHOW WARNINGS' failed to be executed over backend connection with error: '%d'\n", myerr
 			);
 		}
 
-		RequestEnd(myds);
+		RequestEnd(myds, myerr);
 		finishQuery(myds,myconn,prepared_stmt_with_no_params);
 
 		return false;
@@ -5716,7 +5829,7 @@ void MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 	if (session_type == PROXYSQL_SESSION_MYSQL) {
 		__sync_fetch_and_add(&MyHGM->status.frontend_use_db, 1);
 		string nq=string((char *)pkt->ptr+sizeof(mysql_hdr)+1,pkt->size-sizeof(mysql_hdr)-1);
-		SetParser parser(nq);
+		MySQL_Set_Stmt_Parser parser(nq);
 		string errmsg = "";
 		string schemaname = parser.parse_USE_query(errmsg);
 		if (schemaname != "") {
@@ -5739,7 +5852,7 @@ void MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				msg = errmsg + ": " + nq;
 			}
 			client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,1148,(char *)"42000", msg.c_str());
-			RequestEnd(NULL);
+			RequestEnd(NULL, 1118, msg.c_str());
 		}
 		client_myds->DSS=STATE_SLEEP;
 	} else {
@@ -5809,7 +5922,7 @@ void MySQL_Session::handler_WCD_SS_MCQ_qpo_OK_msg(PtrSize_t *pkt) {
 	uint16_t setStatus = (nTrx ? SERVER_STATUS_IN_TRANS : 0 );
 	if (autocommit) setStatus |= SERVER_STATUS_AUTOCOMMIT;
 	client_myds->myprot.generate_pkt_OK(true,NULL,NULL,client_myds->pkt_sid+1,0,0,setStatus,0,qpo->OK_msg);
-	RequestEnd(NULL);
+	RequestEnd(NULL, 0);
 	l_free(pkt->size,pkt->ptr);
 }
 
@@ -5825,7 +5938,8 @@ void MySQL_Session::handler_WCD_SS_MCQ_qpo_OK_msg(PtrSize_t *pkt) {
 void MySQL_Session::handler_WCD_SS_MCQ_qpo_error_msg(PtrSize_t *pkt) {
 	client_myds->DSS=STATE_QUERY_SENT_NET;
 	client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,1148,(char *)"42000",qpo->error_msg);
-	RequestEnd(NULL);
+	MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 1148, (char *)qpo->error_msg);
+	RequestEnd(NULL, 1148, qpo->error_msg);
 	l_free(pkt->size,pkt->ptr);
 }
 
@@ -5842,8 +5956,10 @@ void MySQL_Session::handler_WCD_SS_MCQ_qpo_error_msg(PtrSize_t *pkt) {
 void MySQL_Session::handler_WCD_SS_MCQ_qpo_LargePacket(PtrSize_t *pkt) {
 	// ER_NET_PACKET_TOO_LARGE
 	client_myds->DSS=STATE_QUERY_SENT_NET;
-	client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,1153,(char *)"08S01",(char *)"Got a packet bigger than 'max_allowed_packet' bytes", true);
-	RequestEnd(NULL);
+	string errmsg = "Got a packet bigger than 'max_allowed_packet' bytes";
+	client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,1153,(char *)"08S01", errmsg.c_str(), true);
+	MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 1153, (char *)errmsg.c_str());
+	RequestEnd(NULL, 1153, errmsg.c_str());
 	l_free(pkt->size,pkt->ptr);
 }
 
@@ -5994,7 +6110,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 			) {
 				proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Parsing SET command %s\n", nq.c_str());
 				proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Parsing SET command = %s\n", nq.c_str());
-				SetParser parser(nq);
+				MySQL_Set_Stmt_Parser parser(nq);
 				std::map<std::string, std::vector<std::string>> set = {};
 				if (mysql_thread___set_parser_algorithm == 1) { // legacy behavior
 					set = parser.parse1();
@@ -6547,7 +6663,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					}
 				}
 			} else if (match_regexes && match_regexes[2]->match(dig)) {
-				SetParser parser(nq);
+				MySQL_Set_Stmt_Parser parser(nq);
 				std::map<std::string, std::vector<std::string>> set = parser.parse2();
 
 				for(auto it = std::begin(set); it != std::end(set); ++it) {
@@ -6612,7 +6728,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					}
 				}
 			} else if (match_regexes && match_regexes[3]->match(dig)) {
-				SetParser parser(nq);
+				MySQL_Set_Stmt_Parser parser(nq);
 				std::string charset = parser.parse_character_set();
 				const MARIADB_CHARSET_INFO * c;
 				if (!charset.empty()) {
@@ -6848,7 +6964,7 @@ __exit_set_destination_hostgroup:
 				sprintf(buf,"ProxySQL Error: connection is locked to hostgroup %d but trying to reach hostgroup %d", locked_on_hostgroup, current_hostgroup);
 				client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,client_myds->pkt_sid+1,9006,(char *)"Y0000",buf);
 				thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-				RequestEnd(NULL);
+				RequestEnd(NULL, 9006, buf);
 				l_free(pkt->size,pkt->ptr);
 				return true;
 			}
@@ -7408,24 +7524,25 @@ unsigned long long MySQL_Session::IdleTime() {
 
 // this is called either from RequestEnd(), or at the end of executing
 // prepared statements
-void MySQL_Session::LogQuery(MySQL_Data_Stream *myds) {
+void MySQL_Session::LogQuery(MySQL_Data_Stream *myds, const unsigned int myerrno, const char * errmsg) {
 	// we need to access statistics before calling CurrentQuery.end()
 	// so we track the time here
 	CurrentQuery.end_time=thread->curtime;
 
 	if (qpo) {
 		if (qpo->log==1) {
-			GloMyLogger->log_request(this, myds);	// we send for logging only if logging is enabled for this query
+			GloMyLogger->log_request(this, myds, myerrno, errmsg);	// we send for logging only if logging is enabled for this query
 		} else {
 			if (qpo->log==-1) {
 				if (mysql_thread___eventslog_default_log==1) {
-					GloMyLogger->log_request(this, myds);	// we send for logging only if enabled by default
+					GloMyLogger->log_request(this, myds, myerrno, errmsg);	// we send for logging only if enabled by default
 				}
 			}
 		}
 	}
 }
-void MySQL_Session::RequestEnd(MySQL_Data_Stream *myds) {
+
+void MySQL_Session::RequestEnd(MySQL_Data_Stream *myds,const unsigned int myerrno, const char * errmsg) {
 	// check if multiplexing needs to be disabled
 	char *qdt = NULL;
 
@@ -7446,7 +7563,7 @@ void MySQL_Session::RequestEnd(MySQL_Data_Stream *myds) {
 			break;
 		default:
 			if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
-				LogQuery(myds);
+				LogQuery(myds, myerrno, errmsg);
 			}
 			break;
 	}

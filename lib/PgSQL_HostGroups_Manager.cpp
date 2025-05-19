@@ -1783,19 +1783,14 @@ void PgSQL_HostGroups_Manager::push_MyConn_to_pool(PgSQL_Connection *c, bool _lo
 	if (mysrvc->status==MYSQL_SERVER_STATUS_ONLINE) {
 		if (c->async_state_machine==ASYNC_IDLE) {
 			if (GloMTH == NULL) { goto __exit_push_MyConn_to_pool; }
-#if 0 // disabled for now
-			if (c->local_stmts->get_num_backend_stmts() > (unsigned int)GloMTH->variables.max_stmts_per_connection) {
+			/*if (c->local_stmts->get_num_backend_stmts() > (unsigned int)GloMTH->variables.max_stmts_per_connection) {
 				proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Destroying PgSQL_Connection %p, server %s:%d with status %d because has too many prepared statements\n", c, mysrvc->address, mysrvc->port, mysrvc->status);
 //				delete c;
 				mysrvc->ConnectionsUsed->add(c); // Add the connection back to the list of used connections
 				destroy_MyConn_from_pool(c, false); // Destroy the connection from the pool
-			} else {
-#endif // 0
-				c->optimize();
+			} else {*/
 				mysrvc->ConnectionsFree->add(c);
-#if 0 // disabled for now
-			}
-#endif // 0
+			//}
 		} else {
 			proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Destroying PgSQL_Connection %p, server %s:%d with status %d\n", c, mysrvc->address, mysrvc->port, mysrvc->status);
 			delete c;
@@ -3252,6 +3247,7 @@ SQLite3_result * PgSQL_HostGroups_Manager::SQL3_Connection_Pool(bool _reset, int
 	return result;
 }
 
+#if 0 // DELETE AFTER 2025-07-14
 void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int read_only) {
 	// define queries
 	const char *Q1B=(char *)"SELECT hostgroup_id,status FROM ( SELECT DISTINCT writer_hostgroup FROM pgsql_replication_hostgroups JOIN pgsql_servers WHERE (hostgroup_id=writer_hostgroup) AND hostname='%s' AND port=%d UNION SELECT DISTINCT writer_hostgroup FROM pgsql_replication_hostgroups JOIN pgsql_servers WHERE (hostgroup_id=reader_hostgroup) AND hostname='%s' AND port=%d) LEFT JOIN pgsql_servers ON hostgroup_id=writer_hostgroup AND hostname='%s' AND port=%d";
@@ -3595,6 +3591,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 	}
 	free(query);
 }
+#endif // 0
 
 /**
  * @brief New implementation of the read_only_action method that does not depend on the admin table.

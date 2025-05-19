@@ -14,7 +14,7 @@
 
 #include "prometheus_helpers.h"
 
-#include "set_parser.h"
+#include "MySQL_Set_Stmt_Parser.h"
 
 /*
 #define MIN_POLL_LEN 8
@@ -192,7 +192,7 @@ class __attribute__((aligned(64))) MySQL_Thread : public Base_Thread
 	pthread_mutex_t thread_mutex;
 
 	// if set_parser_algorithm == 2 , a single thr_SetParser is used
-	SetParser *thr_SetParser;
+	MySQL_Set_Stmt_Parser* thr_SetParser;
 
 	MySQL_Thread();
 	~MySQL_Thread();
@@ -528,8 +528,12 @@ class MySQL_Threads_Handler
 		int connpoll_reset_queue_length;
 		char *eventslog_filename;
 		int eventslog_filesize;
+		int eventslog_buffer_history_size;
+		int eventslog_table_memory_size;
+		int eventslog_buffer_max_query_length;
 		int eventslog_default_log;
 		int eventslog_format;
+		int eventslog_stmt_parameters;
 		char *auditlog_filename;
 		int auditlog_filesize;
 		// SSL related, proxy to server

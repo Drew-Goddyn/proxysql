@@ -92,8 +92,13 @@ S Base_Thread::create_new_session_and_client_data_stream(int _fd) {
 		int prevflags = fcntl(_fd, F_GETFL, 0);
 		if (prevflags == -1) {
 			proxy_error("For FD %d fcntl() returned -1 errno %d\n", _fd, errno);
-			if (shutdown == 0)
+			if (
+				(shutdown == 0)
+				&&
+				(glovars.shutdown == 0) // this is specific for modules that do not refresh `shutdown`
+			) {
 				assert(prevflags != -1);
+			}
 		}
 		int nb = fcntl(_fd, F_SETFL, prevflags | O_NONBLOCK);
 		if (nb == -1) {
@@ -132,10 +137,10 @@ S Base_Thread::create_new_session_and_client_data_stream(int _fd) {
 	} else if constexpr (std::is_same_v<T, MySQL_Thread>) {
 		MySQL_Connection* myconn = new MySQL_Connection();
 		sess->client_myds->attach_connection(myconn);
+		sess->client_myds->myconn->set_is_client(); // this is used for prepared statements
 	} else {
 		assert(0);
 	}
-	sess->client_myds->myconn->set_is_client(); // this is used for prepared statements
 	sess->client_myds->myconn->last_time_used = curtime;
 	sess->client_myds->myconn->myds = sess->client_myds; // 20141011
 	sess->client_myds->myconn->fd = sess->client_myds->fd; // 20141011
@@ -344,8 +349,13 @@ void Base_Thread::configure_pollout(DS * myds, unsigned int n) {
 	} else {
 		if (myds->DSS > STATE_MARIADB_BEGIN && myds->DSS < STATE_MARIADB_END) {
 			thr->mypolls.fds[n].events = POLLIN;
-			if (thr->mypolls.myds[n]->myconn->async_exit_status & MYSQL_WAIT_WRITE)
-				thr->mypolls.fds[n].events |= POLLOUT;
+			if constexpr (std::is_same_v<T, PgSQL_Thread>) {
+				if (thr->mypolls.myds[n]->myconn->async_exit_status & PG_EVENT_WRITE)
+					thr->mypolls.fds[n].events |= POLLOUT;
+			} else if constexpr (std::is_same_v<T, MySQL_Thread>) {
+				if (thr->mypolls.myds[n]->myconn->async_exit_status & MYSQL_WAIT_WRITE)
+					thr->mypolls.fds[n].events |= POLLOUT;
+			}
 		} else {
 			myds->set_pollout();
 		}

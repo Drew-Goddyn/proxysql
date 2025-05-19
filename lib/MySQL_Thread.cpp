@@ -353,8 +353,12 @@ static char * mysql_thread_variables_names[]= {
 	(char *)"enable_load_data_local_infile",
 	(char *)"eventslog_filename",
 	(char *)"eventslog_filesize",
+	(char *)"eventslog_buffer_history_size",
+	(char *)"eventslog_table_memory_size",
+	(char *)"eventslog_buffer_max_query_length",
 	(char *)"eventslog_default_log",
 	(char *)"eventslog_format",
+	(char *)"eventslog_stmt_parameters",
 	(char *)"auditlog_filename",
 	(char *)"auditlog_filesize",
 	//(char *)"default_charset", // removed in 2.0.13 . Obsoleted previously using MySQL_Variables instead
@@ -1075,8 +1079,12 @@ MySQL_Threads_Handler::MySQL_Threads_Handler() {
 	variables.server_version=strdup((char *)"8.0.11"); // changed in 2.6.0 , was 5.5.30
 	variables.eventslog_filename=strdup((char *)""); // proxysql-mysql-eventslog is recommended
 	variables.eventslog_filesize=100*1024*1024;
+	variables.eventslog_buffer_history_size=0;
+	variables.eventslog_table_memory_size=10000;
+	variables.eventslog_buffer_max_query_length = 32*1024;
 	variables.eventslog_default_log=0;
 	variables.eventslog_format=1;
+	variables.eventslog_stmt_parameters=0;
 	variables.auditlog_filename=strdup((char *)"");
 	variables.auditlog_filesize=100*1024*1024;
 	//variables.server_capabilities=CLIENT_FOUND_ROWS | CLIENT_PROTOCOL_41 | CLIENT_IGNORE_SIGPIPE | CLIENT_TRANSACTIONS | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_WITH_DB;
@@ -2275,7 +2283,11 @@ char ** MySQL_Threads_Handler::get_variables_list() {
 		// logs
 		VariablesPointers_int["auditlog_filesize"]     = make_tuple(&variables.auditlog_filesize,    1024*1024, 1*1024*1024*1024, false);
 		VariablesPointers_int["eventslog_filesize"]    = make_tuple(&variables.eventslog_filesize,   1024*1024, 1*1024*1024*1024, false);
+		VariablesPointers_int["eventslog_buffer_history_size"]     = make_tuple(&variables.eventslog_buffer_history_size,       0,  8*1024*1024, false);
+		VariablesPointers_int["eventslog_table_memory_size"]       = make_tuple(&variables.eventslog_table_memory_size,         0,  8*1024*1024, false);
+		VariablesPointers_int["eventslog_buffer_max_query_length"] = make_tuple(&variables.eventslog_buffer_max_query_length, 128, 32*1024*1024, false);
 		VariablesPointers_int["eventslog_default_log"] = make_tuple(&variables.eventslog_default_log,        0,                1, false);
+		VariablesPointers_int["eventslog_stmt_parameters"] = make_tuple(&variables.eventslog_stmt_parameters,    0,                1, false);
 		// various
 		VariablesPointers_int["long_query_time"]           = make_tuple(&variables.long_query_time,              0,  20*24*3600*1000, false);
 		VariablesPointers_int["max_allowed_packet"]        = make_tuple(&variables.max_allowed_packet,        8192,   1024*1024*1024, false);
@@ -2964,7 +2976,7 @@ bool MySQL_Thread::init() {
 	mypolls.add(POLLIN, pipefd[0], NULL, 0);
 	assert(i==0);
 
-	thr_SetParser = new SetParser("");
+	thr_SetParser = new MySQL_Set_Stmt_Parser("");
 	match_regexes=(Session_Regex **)malloc(sizeof(Session_Regex *)*4);
 //	match_regexes[0]=new Session_Regex((char *)"^SET (|SESSION |@@|@@session.)SQL_LOG_BIN( *)(:|)=( *)");
 	match_regexes[0] = NULL; // NOTE: historically we used match_regexes[0] for SET SQL_LOG_BIN . Not anymore
@@ -3998,7 +4010,7 @@ void MySQL_Thread::process_all_sessions() {
 			if (sess->to_process==1) {
 				if (sess->pause_until <= curtime) {
 					rc=sess->handler();
-					//total_active_transactions_+=sess->active_transactions;
+
 					if (rc==-1 || sess->killed==true) {
 						char _buf[1024];
 						if (sess->client_myds && sess->killed)
@@ -4174,8 +4186,18 @@ void MySQL_Thread::refresh_variables() {
 
 	REFRESH_VARIABLE_CHAR(server_version);
 	REFRESH_VARIABLE_INT(eventslog_filesize);
+	REFRESH_VARIABLE_INT(eventslog_table_memory_size);
+	REFRESH_VARIABLE_INT(eventslog_buffer_history_size);
+	{
+		int elmhs = mysql_thread___eventslog_buffer_history_size;
+		if (GloMyLogger->MyLogCB->getBufferSize() != elmhs) {
+			GloMyLogger->MyLogCB->setBufferSize(elmhs);
+		}
+	}
+	REFRESH_VARIABLE_INT(eventslog_buffer_max_query_length);
 	REFRESH_VARIABLE_INT(eventslog_default_log);
 	REFRESH_VARIABLE_INT(eventslog_format);
+	REFRESH_VARIABLE_INT(eventslog_stmt_parameters);
 	REFRESH_VARIABLE_CHAR(eventslog_filename);
 	REFRESH_VARIABLE_INT(auditlog_filesize);
 	REFRESH_VARIABLE_CHAR(auditlog_filename);

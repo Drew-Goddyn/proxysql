@@ -236,7 +236,7 @@ void PG_pkt::write_RowDescription(const char *tupdesc, ...) {
 }
 
 
-void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type) {
+void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, char txn_state) {
 	assert(psa != NULL);
 	const char *fs = strchr(query_type, ' ');
 	int qtlen = strlen(query_type);
@@ -296,7 +296,7 @@ void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error,
 			pkt.write_CommandComplete(buf);
 		}
 		pkt.to_PtrSizeArray(psa);
-		pkt.write_ReadyForQuery();
+		pkt.write_ReadyForQuery(txn_state);
 		pkt.to_PtrSizeArray(psa);
 	} else { // no resultset
 		PG_pkt pkt(64);
@@ -328,7 +328,7 @@ void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error,
 			}
 		}
 		pkt.to_PtrSizeArray(psa);
-		pkt.write_ReadyForQuery();
+		pkt.write_ReadyForQuery(txn_state);
 		pkt.to_PtrSizeArray(psa);
 	}
 }
@@ -442,7 +442,7 @@ bool PgSQL_Protocol::generate_pkt_initial_handshake(bool send, void** _ptr, unsi
 		if (RAND_bytes((*myds)->tmp_login_salt, sizeof((*myds)->tmp_login_salt)) != 1) {
 			// Fallback method: using a basic pseudo-random generator
 			srand((unsigned int)time(NULL));  
-			for (int i = 0; i < sizeof((*myds)->tmp_login_salt); i++) {
+			for (size_t i = 0; i < sizeof((*myds)->tmp_login_salt); i++) {
 				(*myds)->tmp_login_salt[i] = rand() % 256;  
 			}
 		}
@@ -669,26 +669,34 @@ unsigned int get_string(const char* data, unsigned int len, const char** dst_p)
 	return (nul + 1 - data);
 }
 
-void PgSQL_Protocol::load_conn_parameters(pgsql_hdr* pkt, bool startup)
+bool PgSQL_Protocol::load_conn_parameters(pgsql_hdr* pkt)
 {
-	const char* key, * val;
-	unsigned int read_pos = 0;
+	uint32_t offset = 0; 
 
-	while (1) {
+	while (offset < pkt->data.size) {
+		char* nameptr = (char*)pkt->data.ptr + offset;
+		uint32_t valoffset;
+		char* valptr;
 
-		int pos = get_string(((const char*)pkt->data.ptr) + read_pos, pkt->data.size - read_pos, &key);
-		if (pos == 0) return;
+		if (*nameptr == '\0')
+			break;			/* found packet terminator */
+		valoffset = offset + strlen(nameptr) + 1;
+		if (valoffset >= pkt->data.size)
+			break;			/* missing value, will complain below */
+		valptr = (char*)pkt->data.ptr + valoffset;
 
-		read_pos += pos;
+		(*myds)->myconn->conn_params.set_value(nameptr, valptr);
 
-		pos = get_string(((const char*)pkt->data.ptr) + read_pos, pkt->data.size - read_pos, &val);
-		if (pos == 0) return;
-
-		read_pos += pos;
-
-		//slog_debug(server, "S: param: %s = %s", key, val);
-		(*myds)->myconn->conn_params.set_value(key, val);
+		offset = valoffset + strlen(valptr) + 1;
 	}
+
+	if (offset != pkt->data.size - 1) {
+		proxy_error("Malformed startup packet was received from client %s:%d\n", (*myds)->addr.addr, (*myds)->addr.port);
+		return false;
+	}
+
+	return true;
+
 }
 
 bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len, bool& ssl_request) {
@@ -716,13 +724,19 @@ bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len
 		return false;
 	}
 
-	load_conn_parameters(&hdr, true);
+	if (!load_conn_parameters(&hdr)) {
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p. malformed startup packet.\n", (*myds)->sess, (*myds));
+		generate_error_packet(true, false, "invalid startup packet layout: expected terminator as last byte", 
+			PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
+		return false;
+	}
 
 	const unsigned char* user = (unsigned char*)(*myds)->myconn->conn_params.get_value(PG_USER);
 
 	if (!user || *user == '\0') {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p. no username supplied.\n", (*myds), (*myds)->sess);
-		generate_error_packet(true, false, "no username supplied", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p. no username supplied.\n", (*myds)->sess, (*myds));
+		generate_error_packet(true, false, "no PostgreSQL user name specified in startup packet", 
+			PGSQL_ERROR_CODES::ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION, true);
 		return false;
 	}
 
@@ -750,6 +764,70 @@ char* extract_password(const pgsql_hdr* hdr, uint32_t* len) {
 
 	if (len) *len = pass_len;
 	return pass;
+}
+
+std::vector<std::pair<std::string, std::string>> PgSQL_Protocol::parse_options(const char* options) {
+	std::vector<std::pair<std::string, std::string>> options_list;
+
+	if (!options) return options_list;
+
+	std::string input(options);
+	size_t pos = 0;
+
+	while (pos < input.size()) {
+		// Skip leading spaces
+		while (pos < input.size() && std::isspace(input[pos])) {
+			++pos;
+		}
+
+		// Check for -c or --
+		if (input.compare(pos, 2, "-c") == 0 || 
+			input.compare(pos, 2, "--") == 0) {
+			pos += 2; // Skip "-c", "--"
+		}
+
+		while (pos < input.size() && std::isspace(input[pos])) {
+			++pos;
+		}
+
+		// Parse key
+		size_t key_start = pos;
+		while (pos < input.size() && input[pos] != '=') {
+			++pos;
+		}
+		std::string key = input.substr(key_start, pos - key_start);
+
+		// Skip '='
+		if (pos < input.size() && input[pos] == '=') {
+			++pos;
+		}
+
+		// Parse value
+		std::string value;
+		bool last_was_escape = false;
+		while (pos < input.size()) {
+			char c = input[pos];
+			if (std::isspace(c) && !last_was_escape) {
+				break;
+			}
+			if (c == '\\' && !last_was_escape) {
+				last_was_escape = true;
+			}
+			else {
+				value += c;
+				last_was_escape = false;
+			}
+			++pos;
+		}
+
+		// Add key-value pair to the list
+		if (!key.empty()) {
+			std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+			options_list.emplace_back(std::move(key), std::move(value));
+		}
+	}
+
+	return options_list;
 }
 
 EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char* pkt, unsigned int len) {
@@ -783,6 +861,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 	if (hdr.type != (*myds)->auth_next_pkt_type) {
 		return EXECUTION_STATE::FAILED;
 	}
+
 
 	user = (char*)(*myds)->myconn->conn_params.get_value(PG_USER);
 
@@ -1003,29 +1082,6 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. User not found in the database.\n", (*myds), (*myds)->sess, user);
 		generate_error_packet(true, false, "User not found", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 	}
-	// set the default session charset
-	//(*myds)->sess->default_charset = charset;
-	
-	/*if (pass_len == 0 && strlen(password) == 0) {
-		ret = true;
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , username='%s' , password=''\n", (*myds), (*myds)->sess, user);
-	}*/
-
-	assert(sess);
-	assert(sess->client_myds);
-	//assert(sess->client_myds->myconn);
-	/*myconn->set_charset(charset, CONNECT_START);
-	{
-		std::stringstream ss;
-		ss << charset;
-
-		mysql_variables.client_set_value(sess, SQL_CHARACTER_SET_RESULTS, ss.str().c_str());
-		mysql_variables.client_set_value(sess, SQL_CHARACTER_SET_CLIENT, ss.str().c_str());
-		mysql_variables.client_set_value(sess, SQL_CHARACTER_SET_CONNECTION, ss.str().c_str());
-		mysql_variables.client_set_value(sess, SQL_COLLATION_CONNECTION, ss.str().c_str());
-	}
-*/
-
 
 	if (ret == EXECUTION_STATE::SUCCESSFUL) {
 
@@ -1037,13 +1093,190 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		userinfo->username = strdup((const char*)user);
 		userinfo->password = strdup((const char*)password);
 
-		const char* db = (*myds)->myconn->conn_params.get_value(PG_DATABASE);
-		userinfo->set_dbname(db ? db : userinfo->username);
+		std::vector<std::pair<std::string, std::string>> parameters;
+		std::vector<std::pair<std::string, std::string>> options_list;
 
-		const char* charset = (*myds)->myconn->conn_params.get_value(PG_CLIENT_ENCODING);
+		parameters.reserve((*myds)->myconn->conn_params.connection_parameters.size());
 
-		//if (charset)
-		//	(*myds)->sess->default_charset = charset;
+		/* Note: Failure due to an invalid parameter returned by the PostgreSQL server, differs from ProxySQL's behavior.
+				 PostgreSQL returns an error during the connection handshake phase, whereas in ProxySQL, the connection succeeds, 
+				 but the error is encountered when executing a query. 
+				 This is behaviour is intentional, as newer PostgreSQL versions may introduce parameters that ProxySQL is not yet aware of.
+		*/
+		// New implementation
+		for (const auto& [param_name, param_val] : (*myds)->myconn->conn_params.connection_parameters) {
+			std::string param_name_lowercase(param_name);
+			std::transform(param_name_lowercase.cbegin(), param_name_lowercase.cend(), param_name_lowercase.begin(), ::tolower);
+
+			// check if parameter is part of connection-level parameters
+			auto itr = param_name_map.find(param_name_lowercase.c_str());
+			if (itr != param_name_map.end()) {
+
+				if (param_name_lowercase.compare("user") == 0 || param_name_lowercase.compare("password") == 0) {
+					continue;
+				}
+
+				bool is_validation_success = false;
+				const Param_Name_Validation* validation = itr->second;
+
+				if (validation != nullptr && validation->accepted_values) {
+					const char** accepted_value = validation->accepted_values;
+					while (*accepted_value) {
+						if (strcmp(param_val.c_str(), *accepted_value) == 0) {
+							is_validation_success = true;
+							break;
+						}
+						accepted_value++;
+					}
+				} else {
+					is_validation_success = true;
+				}
+
+				if (is_validation_success == false) {
+					char* m = NULL;
+					char* errmsg = NULL;
+					proxy_error("invalid value for parameter \"%s\": \"%s\"\n", param_name.c_str(), param_val.c_str());
+					m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+					errmsg = (char*)malloc(param_val.length() + param_name.length() + strlen(m));
+					sprintf(errmsg, m, param_name.c_str(), param_val.c_str());
+					generate_error_packet(true, false, errmsg, PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, true);
+					free(errmsg);	
+					ret = EXECUTION_STATE::FAILED;
+
+					// freeing userinfo->username and userinfo->password to prevent invalid password error generation.
+					free(userinfo->username);
+					free(userinfo->password);
+					userinfo->username = strdup("");
+					userinfo->password = strdup("");
+					//
+					goto __exit_process_pkt_handshake_response;
+				}
+
+				if (param_name_lowercase.compare("database") == 0) {
+					userinfo->set_dbname(param_val.empty() ? user : param_val.c_str());
+				} else if (param_name_lowercase.compare("options") == 0) {
+					options_list = parse_options(param_val.c_str());
+				}
+			} else {
+				// session parameters/variables?
+				parameters.push_back(std::make_pair(param_name_lowercase, param_val));
+			}
+		}
+
+		if (userinfo->dbname == nullptr) {
+			userinfo->set_dbname(user);
+		}
+
+		// Merge options with parameters.  
+		// Options are processed first, followed by connection parameters.  
+		// If a parameter is specified in both, the connection parameter takes precedence  
+		// and overwrites the previosly set value.  
+		if (options_list.empty() == false) {
+			options_list.reserve(parameters.size() + options_list.size());
+			options_list.insert(options_list.end(), std::make_move_iterator(parameters.begin()), std::make_move_iterator(parameters.end()));
+			parameters = std::move(options_list);
+		}
+
+		// assign default datestyle to current datestyle.
+		// This is needed by PgSQL_DateStyle_Util::parse_datestyle
+		sess->current_datestyle = PgSQL_DateStyle_Util::parse_datestyle(pgsql_thread___default_variables[PGSQL_DATESTYLE]);
+
+		for (const auto&[param_key, param_val] : parameters) {
+
+			int idx = PGSQL_NAME_LAST_HIGH_WM;
+			for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+				if (i == PGSQL_NAME_LAST_LOW_WM)
+					continue;
+				if (strncmp(param_key.c_str(), pgsql_tracked_variables[i].set_variable_name, 
+					strlen(pgsql_tracked_variables[i].set_variable_name)) == 0) {
+					idx = i;
+					break;
+				}
+			}
+
+			if (idx != PGSQL_NAME_LAST_HIGH_WM) {
+				std::string value_copy = param_val;
+
+				char* transformed_value = nullptr;
+				if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
+					(
+						*pgsql_tracked_variables[idx].validator->validate)(
+							value_copy.c_str(), &pgsql_tracked_variables[idx].validator->params, sess, &transformed_value) == false
+					) {
+					char* m = NULL;
+					char* errmsg = NULL;
+					proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value_copy.c_str());
+					m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+					errmsg = (char*)malloc(value_copy.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) + strlen(m));
+					sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value_copy.c_str());
+					generate_error_packet(true, false, errmsg, PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, true);
+					free(errmsg);
+					ret = EXECUTION_STATE::FAILED;
+
+					// freeing userinfo->username and userinfo->password to prevent invalid password error generation.
+					free(userinfo->username);
+					free(userinfo->password);
+					userinfo->username = strdup("");
+					userinfo->password = strdup("");
+					//
+					goto __exit_process_pkt_handshake_response;
+				}
+
+				if (transformed_value) {
+					value_copy = transformed_value;
+					free(transformed_value);
+				}
+
+				if (idx == PGSQL_DATESTYLE) {
+					// get datestyle from connection parameters
+					std::string datestyle = value_copy.empty() == false ? value_copy : "";
+
+					if (datestyle.empty()) {
+						// No need to validate default DateStyle again; it is already verified in PgSQL_Threads_Handler::set_variable.
+						datestyle = pgsql_thread___default_variables[PGSQL_DATESTYLE];
+					}
+					else {
+						PgSQL_DateStyle_t datestyle_parsed = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
+
+						// If DateStyle provided in the connection parameters is incomplete, the missing parts will be taken from the default DateStyle.
+						if (datestyle_parsed.format == DATESTYLE_FORMAT_NONE || datestyle_parsed.order == DATESTYLE_ORDER_NONE) {
+							PgSQL_DateStyle_t datestyle_default = PgSQL_DateStyle_Util::parse_datestyle(pgsql_thread___default_variables[PGSQL_DATESTYLE]);
+							datestyle = PgSQL_DateStyle_Util::datestyle_to_string(datestyle_parsed, datestyle_default);
+						}
+					}
+
+					assert(datestyle.empty() == false);
+
+					if (pgsql_variables.client_set_value(sess, PGSQL_DATESTYLE, datestyle.c_str(), false)) {
+						// change current datestyle
+						sess->current_datestyle = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
+						sess->set_default_session_variable(PGSQL_DATESTYLE, datestyle.c_str());
+					}
+				} else {
+					pgsql_variables.client_set_value(sess, idx, value_copy.c_str(), false);
+					sess->set_default_session_variable((enum pgsql_variable_name)idx, value_copy.c_str());
+				}
+			} else {
+				// parameter provided is not part of the tracked variables. Will lock on hostgroup on next query.
+				const char* val_cstr = param_val.c_str();
+				proxy_warning("Unrecognized connection parameter. Please report this as a bug for future enhancements:%s:%s\n", param_key.c_str(), val_cstr);
+				const char* escaped_str = escape_string_backslash_spaces(val_cstr);
+				sess->untracked_option_parameters = "-c " + param_key + "=" + escaped_str + " ";
+				if (escaped_str != val_cstr)
+					free((char*)escaped_str);
+			}
+		}
+
+		// fill all crtical variables with default values, if not set by client
+		for (int i = 0; i < PGSQL_NAME_LAST_LOW_WM; i++) {
+			if (pgsql_variables.client_get_hash(sess, i) != 0)
+				continue;
+			const char* val = pgsql_thread___default_variables[i];
+			pgsql_variables.client_set_value(sess, i, val, false);
+			sess->set_default_session_variable((pgsql_variable_name)i, val);
+		}
+
+		sess->client_myds->myconn->reorder_dynamic_variables_idx();
 	}
 	else {
 		// we always duplicate username and password, or crashes happen
@@ -1084,18 +1317,32 @@ void PgSQL_Protocol::welcome_client() {
 	if (application_name)
 		pgpkt.write_ParameterStatus("application_name", application_name);
 
-	const char* client_encoding = (*myds)->myconn->conn_params.get_value(PG_CLIENT_ENCODING);
+	/*
+	const char* client_encoding = pgsql_variables.client_get_value((*myds)->sess, PGSQL_CLIENT_ENCODING); //(*myds)->myconn->conn_params.get_value(PG_CLIENT_ENCODING);
 	if (client_encoding)
 		pgpkt.write_ParameterStatus("client_encoding", client_encoding);
-	// if client does not provide client_encoding, PostgreSQL uses the default client encoding. 
-	// We need to save the default client encoding to send it to the client in case client doesn't provide one.
-	else if (pgsql_thread___default_client_encoding) 
-		pgpkt.write_ParameterStatus("client_encoding", pgsql_thread___default_client_encoding);
+	else 
+		assert(0);
+
+	const char* datestyle = pgsql_variables.client_get_value((*myds)->sess, PGSQL_DATESTYLE);
+	if (datestyle)
+		pgpkt.write_ParameterStatus("datestyle", datestyle);
+	*/
+	for (unsigned int idx = 0; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
+
+		if (pgsql_variables.client_get_hash((*myds)->sess, idx) == 0)
+			continue;
+
+		const char* val = pgsql_variables.client_get_value(sess, idx);
+		if (val)
+			pgpkt.write_ParameterStatus(pgsql_tracked_variables[idx].internal_variable_name, val);
+	}
 
 	if (pgsql_thread___server_version)
 		pgpkt.write_ParameterStatus("server_version", pgsql_thread___server_version);
 
-	pgpkt.write_ParameterStatus("server_encoding", "UTF8");
+	if (pgsql_thread___server_encoding)
+		pgpkt.write_ParameterStatus("server_encoding", pgsql_thread___server_encoding);
 
 	pgpkt.write_ReadyForQuery();
 	pgpkt.set_multi_pkt_mode(false);
@@ -1331,7 +1578,8 @@ void PgSQL_Protocol::generate_ParseComplete(bool send, PtrSize_t* _ptr) {
 	}
 }
 
-bool PgSQL_Protocol::generate_ok_packet(bool send, bool ready, const char* msg, int rows, const char* query, char trx_state, PtrSize_t* _ptr) {
+bool PgSQL_Protocol::generate_ok_packet(bool send, bool ready, const char* msg, int rows, const char* query, char trx_state, PtrSize_t* _ptr,
+	const std::vector<std::pair<std::string, std::string>>& param_status) {
 	// to avoid memory leak
 	assert(send == true || _ptr);
 
@@ -1362,6 +1610,10 @@ bool PgSQL_Protocol::generate_ok_packet(bool send, bool ready, const char* msg, 
 	}
 	free(tag);
 	
+	for (auto& [param_name, param_value] : param_status) {
+		pgpkt.write_ParameterStatus(param_name.c_str(), param_value.c_str());
+	}
+
 	if (ready == true) {
 		pgpkt.write_ReadyForQuery(trx_state);
 		pgpkt.set_multi_pkt_mode(false);
@@ -2033,8 +2285,7 @@ void PgSQL_Query_Result::init(PgSQL_Protocol* _proto, PgSQL_Data_Stream* _myds, 
 
 	if (conn->processing_multi_statement == false)
 		transfer_started = false;
-	buffer_init();
-	reset();
+	clear();
 
 	if (proto == NULL) {
 		return; // this is a mirror
@@ -2223,7 +2474,6 @@ void PgSQL_Query_Result::reset() {
 	affected_rows = -1;
 	result_packet_type = PGSQL_QUERY_RESULT_NO_DATA;
 }
-
 
 bool PgBindPacket::parseBindPacket(PtrSize_t& pkt) {
 	const char *packet = (const char *)pkt.ptr;
@@ -2519,4 +2769,14 @@ bool PgParsePacket::parseParsePacket(PtrSize_t& pkt) {
 	this->pkt_ptr = pkt.ptr;
     // If we reach here, the packet is valid and fully parsed
     return true;
+}
+
+void PgSQL_Query_Result::clear() {
+	PtrSize_t pkt;
+	while (PSarrayOUT.len) {
+		PSarrayOUT.remove_index_fast(0, &pkt);
+		l_free(pkt.size, pkt.ptr);
+	}
+	buffer_init();
+	reset();
 }

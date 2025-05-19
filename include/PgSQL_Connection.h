@@ -38,7 +38,6 @@ enum PgSQL_Param_Name {
 	PG_REQUIRE_AUTH,  // Specifies the authentication method that the client requires from the server
 	PG_CHANNEL_BINDING,  // Controls the client's use of channel binding
 	PG_CONNECT_TIMEOUT,  // Maximum time to wait while connecting, in seconds
-	PG_CLIENT_ENCODING,  // Sets the client_encoding configuration parameter for this connection
 	PG_OPTIONS,  // Specifies command-line options to send to the server at connection start
 	PG_APPLICATION_NAME,  // Specifies a value for the application_name configuration parameter
 	PG_FALLBACK_APPLICATION_NAME,  // Specifies a fallback value for the application_name configuration parameter
@@ -70,120 +69,81 @@ enum PgSQL_Param_Name {
 	PG_TARGET_SESSION_ATTRS,  // Determines whether the session must have certain properties to be acceptable
 	PG_LOAD_BALANCE_HOSTS,  // Controls the order in which the client tries to connect to the available hosts and addresses
 	// Environment Options
-	PG_DATESTYLE,  // Sets the value of the DateStyle parameter
-	PG_TIMEZONE,  // Sets the value of the TimeZone parameter
-	PG_GEQO,  // Enables or disables the use of the GEQO query optimizer
+	//PG_DATESTYLE,  // Sets the value of the DateStyle parameter
+	//PG_TIMEZONE,  // Sets the value of the TimeZone parameter
+	//PG_GEQO,  // Enables or disables the use of the GEQO query optimizer
 
 	PG_PARAM_SIZE
-};
-
-static const char* PgSQL_Param_Name_Str[] = {
-	"host",
-	"hostaddr",
-	"port",
-	"database",
-	"user",
-	"password",
-	"passfile",
-	"require_auth",
-	"channel_binding",
-	"connect_timeout",
-	"client_encoding",
-	"options",
-	"application_name",
-	"fallback_application_name",
-	"keepalives",
-	"keepalives_idle",
-	"keepalives_interval",
-	"keepalives_count",
-	"tcp_user_timeout",
-	"replication",
-	"gsseencmode",
-	"sslmode",
-	"requiressl",
-	"sslcompression",
-	"sslcert",
-	"sslkey",
-	"sslpassword",
-	"sslcertmode",
-	"sslrootcert",
-	"sslcrl",
-	"sslcrldir",
-	"sslsni",
-	"requirepeer",
-	"ssl_min_protocol_version",
-	"ssl_max_protocol_version",
-	"krbsrvname",
-	"gsslib",
-	"gssdelegation",
-	"service",
-	"target_session_attrs",
-	"load_balance_hosts",
-	// Environment Options
-	"datestyle",
-	"timezone",
-	"geqo"
 };
 
 struct Param_Name_Validation {
 	const char** accepted_values;
 	int default_value_idx;
-
 };
 
-static const Param_Name_Validation require_auth			{(const char*[]){"password","md5","gss","sspi","scram-sha-256","none",nullptr},-1};
-static const Param_Name_Validation replication			{(const char*[]){"true","on","yes","1","database","false","off","no","0",nullptr},-1};
-static const Param_Name_Validation gsseencmode			{(const char*[]){"disable","prefer","require",nullptr},1};
-static const Param_Name_Validation sslmode				{(const char*[]){"disable","allow","prefer","require","verify-ca","verify-full",nullptr},2};
-static const Param_Name_Validation sslcertmode			{(const char*[]){"disable","allow","require",nullptr},1};
-static const Param_Name_Validation target_session_attrs {(const char*[]){"any","read-write","read-only","primary","standby","prefer-standby",nullptr},0 };
-static const Param_Name_Validation load_balance_hosts	{(const char*[]){"disable","random",nullptr},-1};
+static const Param_Name_Validation require_auth{ (const char* []) { "password","md5","gss","sspi","scram-sha-256","none",nullptr },-1 };
+static const Param_Name_Validation replication{ (const char* []) { "true","on","yes","1","database","false","off","no","0",nullptr },-1 };
+static const Param_Name_Validation gsseencmode{ (const char* []) { "disable","prefer","require",nullptr },1 };
+static const Param_Name_Validation sslmode{ (const char* []) { "disable","allow","prefer","require","verify-ca","verify-full",nullptr },2 };
+static const Param_Name_Validation sslcertmode{ (const char* []) { "disable","allow","require",nullptr },1 };
+static const Param_Name_Validation target_session_attrs{ (const char* []) { "any","read-write","read-only","primary","standby","prefer-standby",nullptr },0 };
+static const Param_Name_Validation load_balance_hosts{ (const char* []) { "disable","random",nullptr },-1 };
 
-static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SIZE] = {
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&require_auth,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&replication,
-	&gsseencmode,
-	&sslmode,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&sslcertmode,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&target_session_attrs,
-	&load_balance_hosts,
-	nullptr,
-	nullptr,
-	nullptr
+// Excluding client_encoding since it is managed as part of the session variables
+#define PARAMETER_LIST \
+    PARAM("host", nullptr) \
+    PARAM("hostaddr", nullptr) \
+    PARAM("port", nullptr) \
+    PARAM("database", nullptr) \
+    PARAM("user", nullptr) \
+    PARAM("password", nullptr) \
+    PARAM("passfile", nullptr) \
+    PARAM("require_auth", &require_auth) \
+    PARAM("channel_binding", nullptr) \
+    PARAM("connect_timeout", nullptr) \
+    PARAM("options", nullptr) \
+    PARAM("application_name", nullptr) \
+    PARAM("fallback_application_name", nullptr) \
+    PARAM("keepalives", nullptr) \
+    PARAM("keepalives_idle", nullptr) \
+    PARAM("keepalives_interval", nullptr) \
+    PARAM("keepalives_count", nullptr) \
+    PARAM("tcp_user_timeout", nullptr) \
+    PARAM("replication", &replication) \
+    PARAM("gsseencmode", &gsseencmode) \
+    PARAM("sslmode", &sslmode) \
+    PARAM("requiressl", nullptr) \
+    PARAM("sslcompression", nullptr) \
+    PARAM("sslcert", nullptr) \
+    PARAM("sslkey", nullptr) \
+    PARAM("sslpassword", nullptr) \
+    PARAM("sslcertmode", &sslcertmode) \
+    PARAM("sslrootcert", nullptr) \
+    PARAM("sslcrl", nullptr) \
+    PARAM("sslcrldir", nullptr) \
+    PARAM("sslsni", nullptr) \
+    PARAM("requirepeer", nullptr) \
+    PARAM("ssl_min_protocol_version", nullptr) \
+    PARAM("ssl_max_protocol_version", nullptr) \
+    PARAM("krbsrvname", nullptr) \
+    PARAM("gsslib", nullptr) \
+    PARAM("gssdelegation", nullptr) \
+    PARAM("service", nullptr) \
+    PARAM("target_session_attrs", &target_session_attrs) \
+    PARAM("load_balance_hosts", &load_balance_hosts)
+
+// Generate parameter array
+constexpr const char* param_name[] = {
+#define PARAM(name, val) name,
+	PARAMETER_LIST
+#undef PARAM
+};
+
+// make sure all the keys are in lower case
+static const std::unordered_map<std::string_view, const Param_Name_Validation*> param_name_map = {
+#define PARAM(name, val) {name, val},
+	PARAMETER_LIST
+#undef PARAM
 };
 
 #define PG_EVENT_NONE	 0x00
@@ -192,83 +152,66 @@ static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SI
 #define PG_EVENT_EXCEPT  0x04
 #define PG_EVENT_TIMEOUT 0x08
 
+
+/**
+ * @class PgSQL_Conn_Param
+ * @brief Stores PostgreSQL connection parameters sent by client.
+ *
+ * This class stores key-value pairs representing connection parameters 
+ * for PostgreSQL connection. 
+ *
+ */
 class PgSQL_Conn_Param {
-private:
-	bool validate(PgSQL_Param_Name key, const char* val) {
-		assert(val);
-		const Param_Name_Validation* validation = PgSQL_Param_Name_Accepted_Values[key];
-
-		if (validation != nullptr && validation->accepted_values) {
-			const char** accepted_value = validation->accepted_values;
-			while (accepted_value != nullptr) {
-				if (strcmp(val, *accepted_value) == 0) {
-					return true;
-				}
-			}
-		} else {
-			return true;
-		}
-		
-		return false;
-	}
-
 public:
-	PgSQL_Conn_Param() {}
-	~PgSQL_Conn_Param() {
-		for (int i = 0; i < PG_PARAM_SIZE; i++) {
-			if (param_value[i])
-				free(param_value[i]);
-		}
-	}
+    PgSQL_Conn_Param() {}
+    ~PgSQL_Conn_Param() {}
 
-	bool set_value(PgSQL_Param_Name key, const char* val) {
-		if (key == -1) return false;
-		if (validate(key, val)) {
-			if (param_value[key]) {
-				free(param_value[key]);
-			}
-			param_value[key] = strdup(val);
-			param_set.push_back(key);
-			return true;
-		}
-		return false;
-	}
+    bool set_value(const char* key, const char* val) {
+        if (key == nullptr || val == nullptr) return false;
+        connection_parameters[key] = val;
+        return true;
+    }
 
-	bool set_value(const char* key, const char* val) {
-		return set_value((PgSQL_Param_Name)get_param_name(key), val);
-	}
+    inline
+    const char* get_value(PgSQL_Param_Name key) const {
+        return get_value(param_name[key]);
+    }
 
-	void reset_value(PgSQL_Param_Name key) {
-		if (param_value[key]) {
-			free(param_value[key]);
-		}
-		param_value[key] = nullptr;
+    const char* get_value(const char* key) const {
+        auto it = connection_parameters.find(key);
+        if (it != connection_parameters.end()) {
+            return it->second.c_str();
+        }
+        return nullptr;
+    }
 
-		// this has O(n) complexity. need to fix it....
-		param_set.erase(param_set.begin() + static_cast<int>(key));
-	}
+    bool remove_value(const char* key) {
+        auto it = connection_parameters.find(key);
+        if (it != connection_parameters.end()) {
+            connection_parameters.erase(it);
+            return true;
+        }
+        return false;
+    }
 
-	const char* get_value(PgSQL_Param_Name key) const {
-		return param_value[key];
-	}
+    inline
+    bool is_empty() const {
+        return connection_parameters.empty();
+    }
 
-	int get_param_name(const char* name) {
-		int key = -1;
+    inline
+    void clear() {
+        connection_parameters.clear();
+    }
 
-		for (int i = 0; i < PG_PARAM_SIZE; i++) {
-			if (strcmp(name, PgSQL_Param_Name_Str[i]) == 0) {
-				key = i;
-				break;
-			}
-		}
-		if (key == -1) {
-			proxy_warning("Unrecognized connection option. Please report this as a bug for future enhancements:%s\n", name);
-		}
-		return key;
-	}
+private:
+    /**
+     * @brief Stores the connection parameters as key-value pairs.
+     */
+    std::map<std::string, std::string> connection_parameters;
 
-	std::vector<PgSQL_Param_Name> param_set;
-	char* param_value[PG_PARAM_SIZE]{};
+    friend class PgSQL_Session; 
+    friend class PgSQL_Protocol;
 };
 
 class PgSQL_Variable {
@@ -276,13 +219,6 @@ public:
 	char *value = (char*)"";
 	void fill_server_internal_session(nlohmann::json &j, int conn_num, int idx);
 	void fill_client_internal_session(nlohmann::json &j, int idx);
-};
-
-enum pgsql_charset_action {
-	POSTGRESQL_CHARSET_ACTION_UNKNOWN,
-	POSTGRESQL_CHARSET_ACTION_NAMES,
-	POSTGRESQL_CHARSET_ACTION_CHARSET,
-	POSTGRESQL_CHARSET_ACTION_CONNECT_START
 };
 
 class PgSQL_Connection_userinfo {
@@ -306,186 +242,7 @@ class PgSQL_Connection_userinfo {
 	bool set_dbname(const char *);
 };
 
-class PgSQL_Connection_Placeholder {
-	private:
-	void update_warning_count_from_connection();
-	void update_warning_count_from_statement();
-	bool is_expired(unsigned long long timeout);
-	unsigned long long inserted_into_pool;
-	public:
-	struct {
-		char *server_version;
-		uint32_t max_allowed_pkt;
-		uint32_t server_capabilities;
-		uint32_t client_flag;
-		unsigned int compression_min_length;
-		char *init_connect;
-		bool init_connect_sent;
-		char *ldap_user_variable;
-		char *ldap_user_variable_value;
-		bool ldap_user_variable_sent;
-		uint8_t protocol_version;
-		int8_t last_set_autocommit;
-		bool autocommit;
-		bool no_backslash_escapes;
-	} options;
-
-	PgSQL_Conn_Param conn_params;
-
-	PgSQL_Variable variables[SQL_NAME_LAST_HIGH_WM];
-	uint32_t var_hash[SQL_NAME_LAST_HIGH_WM];
-	// for now we store possibly missing variables in the lower range
-	// we may need to fix that, but this will cost performance
-	bool var_absent[SQL_NAME_LAST_HIGH_WM] = {false};
-
-	std::vector<uint32_t> dynamic_variables_idx;
-	unsigned int reorder_dynamic_variables_idx();
-
-	struct {
-		unsigned long length;
-		char *ptr;
-		MYSQL_STMT *stmt;
-		MYSQL_RES *stmt_result;
-		stmt_execute_metadata_t *stmt_meta;
-	} query;
-	char scramble_buff[40];
-	unsigned long long creation_time;
-	unsigned long long last_time_used;
-	unsigned long long timeout;
-	int auto_increment_delay_token;
-	int fd;
-	PgSQL_STMTs_local_v14 *local_stmts;	// local view of prepared statements
-	MYSQL *pgsql;
-	MYSQL *ret_mysql;
-	MYSQL_RES *mysql_result;
-	MYSQL_ROW mysql_row;
-	PgSQL_SrvC *parent;
-	PgSQL_Connection_userinfo *userinfo;
-	PgSQL_Data_Stream *myds;
-
-	struct {
-		char* hostname;
-		char* ip;
-	} connected_host_details;
-	/**
-	 * @brief Keeps tracks of the 'server_status'. Do not confuse with the 'server_status' from the
-	 *  'MYSQL' connection itself. This flag keeps track of the configured server status from the
-	 *  parent 'MySrvC'.
-	 */
-	enum MySerStatus server_status; // this to solve a side effect of #774
-
-	bytes_stats_t bytes_info; // bytes statistics
-	struct {
-		unsigned long long questions;
-		unsigned long long pgconnpoll_get;
-		unsigned long long pgconnpoll_put;
-	} statuses;
-
-	unsigned long largest_query_length;
-	unsigned int warning_count;
-	/**
-	 * @brief This represents the internal knowledge of ProxySQL about the connection. It keeps track of those
-	 *  states which *are not reflected* into 'server_status', but are relevant for connection handling.
-	 */
-	uint32_t status_flags;
-	int async_exit_status; // exit status of MariaDB Client Library Non blocking API
-	int interr;	// integer return
-	PG_ASYNC_ST async_state_machine;	// Async state machine
-	short wait_events;
-	uint8_t compression_pkt_id;
-	my_bool ret_bool;
-	bool async_fetch_row_start;
-	bool send_quit;
-	bool reusable;
-	bool processing_multi_statement;
-	bool multiplex_delayed;
-	bool unknown_transaction_status;
-	void compute_unknown_transaction_status();
-	PgSQL_Connection_Placeholder();
-	~PgSQL_Connection_Placeholder();
-	bool set_autocommit(bool);
-	bool set_no_backslash_escapes(bool);
-	unsigned int set_charset(unsigned int, enum pgsql_charset_action);
-
-	void set_status(bool set, uint32_t status_flag);
-	bool get_status(uint32_t status_flag);
-#if 0
-	void set_status_sql_log_bin0(bool);
-	bool get_status_sql_log_bin0();
-	void set_autocommit_start();
-	void set_autocommit_cont(short event);
-#endif // 0
-	void set_names_start();
-	void set_names_cont(short event);
-#ifndef PROXYSQL_USE_RESULT
-	void store_result_start();
-	void store_result_cont(short event);
-#endif // PROXYSQL_USE_RESULT
-#if 0
-	void initdb_start();
-	void initdb_cont(short event);
-	void set_option_start();
-	void set_option_cont(short event);
-#endif // 0
-	void set_query(char *stmt, unsigned long length);
-	
-	int async_set_autocommit(short event, bool);
-	int async_set_names(short event, unsigned int nr);
-	int async_send_simple_command(short event, char *stmt, unsigned long length); // no result set expected
-
-	int async_set_option(short event, bool mask);
-
-	//void stmt_execute_start();
-	//void stmt_execute_cont(short event);
-	void stmt_execute_store_result_start();
-	void stmt_execute_store_result_cont(short event);
-
-	/**
-	 * @brief Process the rows returned by 'async_stmt_execute_store_result'. Extracts all the received
-	 *   rows from 'query.stmt->result.data' but the last one, adds them to 'MyRS', frees the buffer
-	 *   used by 'query.stmt' and allocates a new one with the last row, leaving it ready for being filled
-	 *   with the new rows to be received.
-	 * @param processed_bytes Reference to the already processed bytes to be updated with the rows
-	 *   that are being read and added to 'MyRS'.
-	 */
-	void process_rows_in_ASYNC_STMT_EXECUTE_STORE_RESULT_CONT(uint64_t& processed_bytes);
-
-	void async_free_result();
-
-	
-	bool IsAutoCommit();
-	bool AutocommitFalse_AndSavepoint();
-	bool MultiplexDisabled(bool check_delay_token = true);
-	bool IsKeepMultiplexEnabledVariables(char *query_digest_text);
-	void optimize();
-	void close_mysql();
-
-	void set_is_client(); // used for local_stmts
-
-	void reset();
-
-	void reduce_auto_increment_delay_token() { if (auto_increment_delay_token) auto_increment_delay_token--; };
-
-	bool match_tracked_options(const PgSQL_Connection *c);
-	unsigned int number_of_matching_session_variables(const PgSQL_Connection *client_conn, unsigned int& not_matching);
-	unsigned long get_mysql_thread_id() { return pgsql ? pgsql->thread_id : 0; }
-
-
-	/********* These will be removed **********/
-	MySQL_ResultSet* MyRS;
-	MySQL_ResultSet* MyRS_reuse;
-	
-	// these method should not be called from this class
-	int async_select_db(short event) { assert(0); return -1; }
-	bool IsServerOffline() { assert(0); return false; }
-	bool IsKnownActiveTransaction() { assert(0); return false; }
-	bool IsActiveTransaction() { assert(0); return false; }
-	PG_ASYNC_ST handler(short event) { assert(0); return ASYNC_IDLE; }
-	void ProcessQueryAndSetStatusFlags(char* query_digest_text);
-	/********* End of remove ******************/
-};
-
-class PgSQL_Connection : public PgSQL_Connection_Placeholder {
+class PgSQL_Connection {
 public:
 	PgSQL_Connection();
 	~PgSQL_Connection();
@@ -501,13 +258,12 @@ public:
 	void reset_session_cont(short event);
 	
 	int  async_connect(short event);
-#if 0
-	int  async_set_autocommit(short event, bool ac);
-#endif // 0
-	int  async_query(short event, char* stmt, unsigned long length, MYSQL_STMT** _stmt = NULL, stmt_execute_metadata_t* _stmt_meta = NULL);
+
+	int  async_query(short event, char* stmt, unsigned long length);
 	int  async_ping(short event);
 	int  async_reset_session(short event);
-	
+	int	 async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
+
 	void next_event(PG_ASYNC_ST new_st);
 	bool IsAutoCommit();
 	bool is_connected() const;
@@ -610,10 +366,9 @@ public:
 	PGresult* get_result();
 	void next_multi_statement_result(PGresult* result);
 	bool set_single_row_mode();
-	void optimize() {}
 	void update_bytes_recv(uint64_t bytes_recv);
 	void update_bytes_sent(uint64_t bytes_sent);
-	void ProcessQueryAndSetStatusFlags(char* query_digest_text);
+	void ProcessQueryAndSetStatusFlags(char* query_digest_text, int savepoint_count);
 
 	inline const PGconn* get_pg_connection() const { return pgsql_conn; }
 	inline int get_pg_server_version() { return PQserverVersion(pgsql_conn); }
@@ -638,12 +393,80 @@ public:
 	inline int get_pg_is_threadsafe() { return PQisthreadsafe(); }
 	inline const char* get_pg_error_message() { return PQerrorMessage(pgsql_conn); }
 	inline SSL* get_pg_ssl_object() { return (SSL*)PQsslStruct(pgsql_conn, "OpenSSL"); }
+	inline const char* get_pg_parameter_status(const char* param) { return PQparameterStatus(pgsql_conn, param); }
 	const char* get_pg_server_version_str(char* buff, int buff_size);
 	const char* get_pg_connection_status_str();
 	const char* get_pg_transaction_status_str();
 	unsigned int get_memory_usage() const;
 
-	//PgSQL_Conn_Param conn_params;
+	inline
+	int get_backend_pid() { return (pgsql_conn) ? get_pg_backend_pid() : -1; }
+
+	static int char_to_encoding(const char* name) {
+		return pg_char_to_encoding(name);
+	}
+
+	static const char* encoding_to_char(int encoding) {
+		return pg_encoding_to_char(encoding);
+	}
+
+	static int valid_server_encoding_id(int encoding) {
+		return pg_valid_server_encoding_id(encoding);
+	}
+
+	inline
+	void reduce_auto_increment_delay_token() { if (auto_increment_delay_token) auto_increment_delay_token--; };
+
+	void set_status(bool set, uint32_t status_flag);
+	bool get_status(uint32_t status_flag);
+	bool MultiplexDisabled(bool check_delay_token = true);
+
+	bool AutocommitFalse_AndSavepoint();
+
+	unsigned int reorder_dynamic_variables_idx();
+	unsigned int number_of_matching_session_variables(const PgSQL_Connection* client_conn, unsigned int& not_matching);
+	void set_query(char* stmt, unsigned long length);
+	void reset();
+
+	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
+
+	struct {
+		unsigned long length;
+		char* ptr;
+	} query;
+
+	struct {
+		char* init_connect;
+		bool init_connect_sent;
+	} options;
+
+	struct {
+		char* hostname;
+		char* ip;
+	} connected_host_details;
+
+	bytes_stats_t bytes_info; // bytes statistics
+	struct {
+		unsigned long long questions;
+		unsigned long long pgconnpoll_get;
+		unsigned long long pgconnpoll_put;
+	} statuses;
+
+	PgSQL_Variable variables[PGSQL_NAME_LAST_HIGH_WM];
+	uint32_t var_hash[PGSQL_NAME_LAST_HIGH_WM];
+	// for now we store possibly missing variables in the lower range
+	// we may need to fix that, but this will cost performance
+	bool var_absent[PGSQL_NAME_LAST_HIGH_WM] = { false };
+	std::vector<uint32_t> dynamic_variables_idx;
+
+	/**
+	 * @brief Keeps tracks of the 'server_status'. Do not confuse with the 'server_status' from the
+	 *  'MYSQL' connection itself. This flag keeps track of the configured server status from the
+	 *  parent 'MySrvC'.
+	 */
+	enum MySerStatus server_status; // this to solve a side effect of #774
+
+	PgSQL_Conn_Param conn_params;
 	PgSQL_ErrorInfo error_info;
 	PGconn* pgsql_conn;
 	uint8_t result_type;
@@ -651,12 +474,39 @@ public:
 	PSresult  ps_result;
 	PgSQL_Query_Result* query_result;
 	PgSQL_Query_Result* query_result_reuse;
+	unsigned long long creation_time;
+	unsigned long long last_time_used;
+	unsigned long long timeout;
+	int auto_increment_delay_token;
+	PG_ASYNC_ST async_state_machine;	// Async state machine
+	short wait_events;
 	bool new_result;
 	bool is_copy_out;
-	//PgSQL_SrvC* parent;
-	//PgSQL_Connection_userinfo* userinfo;
-	//PgSQL_Data_Stream* myds;
-	//int fd;
+
+	bool send_quit;
+	bool reusable;
+	bool processing_multi_statement;
+	bool multiplex_delayed;
+
+
+	PgSQL_SrvC *parent;
+	PgSQL_Connection_userinfo* userinfo;
+	PgSQL_Data_Stream* myds;
+	//unsigned int warning_count;
+	int fd;
+	/**
+	 * @brief This represents the internal knowledge of ProxySQL about the connection. It keeps track of those
+	 *  states which *are not reflected* into 'server_status', but are relevant for connection handling.
+	 */
+	uint32_t status_flags;
+	unsigned long largest_query_length;
+	int async_exit_status; // exit status of Non blocking API
+	int interr;	// integer return
+	bool unknown_transaction_status;
+	PgSQL_STMTs_local_v14 *local_stmts;	// local view of prepared statements
+
+
+
 
 private:
 	// Handles the COPY OUT response from the server.
@@ -664,6 +514,8 @@ private:
 	bool handle_copy_out(const PGresult* result, uint64_t* processed_bytes);
 	static void notice_handler_cb(void* arg, const PGresult* result);
 	static void unhandled_notice_cb(void* arg, const PGresult* result);
+	//void update_warning_count_from_connection();
+	//void update_warning_count_from_statement();
 };
 
 #endif /* __CLASS_PGSQL_CONNECTION_H */

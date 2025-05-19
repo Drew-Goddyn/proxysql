@@ -3517,6 +3517,7 @@ SQLite3_result * MySQL_HostGroups_Manager::SQL3_Connection_Pool(bool _reset, int
 	return result;
 }
 
+#if 0 // DELETE AFTER 2025-07-14
 void MySQL_HostGroups_Manager::read_only_action(char *hostname, int port, int read_only) {
 	// define queries
 	const char *Q1B=(char *)"SELECT hostgroup_id,status FROM ( SELECT DISTINCT writer_hostgroup FROM mysql_replication_hostgroups JOIN mysql_servers WHERE (hostgroup_id=writer_hostgroup) AND hostname='%s' AND port=%d UNION SELECT DISTINCT writer_hostgroup FROM mysql_replication_hostgroups JOIN mysql_servers WHERE (hostgroup_id=reader_hostgroup) AND hostname='%s' AND port=%d) LEFT JOIN mysql_servers ON hostgroup_id=writer_hostgroup AND hostname='%s' AND port=%d";
@@ -3860,6 +3861,7 @@ void MySQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 	}
 	free(query);
 }
+#endif // 0
 
 /**
  * @brief New implementation of the read_only_action method that does not depend on the admin table.
@@ -4086,6 +4088,41 @@ void MySQL_HostGroups_Manager::set_server_current_latency_us(char *hostname, int
 				mysrvc=myhgc->mysrvs->idx(j);
 				if (mysrvc->port==port && strcmp(mysrvc->address,hostname)==0) {
 					mysrvc->current_latency_us=_current_latency_us;
+				}
+			}
+		}
+	}
+	wrunlock();
+}
+
+void MySQL_HostGroups_Manager::set_Readyset_status(char *hostname, int port, enum MySerStatus status) {
+	wrlock();
+	MySrvC *mysrvc=NULL;
+	for (unsigned int i=0; i<MyHostGroups->len; i++) {
+	MyHGC *myhgc=(MyHGC *)MyHostGroups->index(i);
+		unsigned int j;
+		unsigned int l=myhgc->mysrvs->cnt();
+		if (l) {
+			for (j=0; j<l; j++) {
+				mysrvc=myhgc->mysrvs->idx(j);
+				if (mysrvc->port==port && strcmp(mysrvc->address,hostname)==0) {
+					enum MySerStatus prev_status = mysrvc->get_status();
+					if (prev_status != status) {
+						char *src_status = "?"; // this shouldn't display
+						char *dst_status = "?"; // this shouldn't display
+						if (prev_status == MYSQL_SERVER_STATUS_ONLINE) { src_status = "ONLINE"; }
+						else if (prev_status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { src_status = "OFFLINE_SOFT"; }
+						else if (prev_status == MYSQL_SERVER_STATUS_SHUNNED) { src_status = "SHUNNED"; };
+						if (status == MYSQL_SERVER_STATUS_ONLINE) { dst_status = "ONLINE"; }
+						else if (status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { dst_status = "OFFLINE_SOFT"; }
+						else if (status == MYSQL_SERVER_STATUS_SHUNNED) { dst_status = "SHUNNED"; };
+						if (status == MYSQL_SERVER_STATUS_ONLINE) {
+							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
+						} else {
+							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
+						}
+						mysrvc->set_status(status);
+					}
 				}
 			}
 		}

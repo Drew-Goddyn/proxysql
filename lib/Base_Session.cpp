@@ -43,7 +43,7 @@ template void Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL_Backend, MySQ
 template void Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>::reset_all_backends();
 
 template bool Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL_Backend, MySQL_Thread>::handler_special_queries_STATUS(_PtrSize_t*);
-template bool Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>::handler_special_queries_STATUS(_PtrSize_t*);
+//template bool Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>::handler_special_queries_STATUS(_PtrSize_t*);
 
 template void Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL_Backend, MySQL_Thread>::housekeeping_before_pkts();
 template void Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>::housekeeping_before_pkts();
@@ -313,7 +313,12 @@ void Base_Session<S, DS, B, T>::return_proxysql_internal(PtrSize_t* pkt) {
 		}
 		// default
 		client_myds->DSS = STATE_QUERY_SENT_NET;
-		client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1064, (char*)"42000", (char*)"Unknown PROXYSQL INTERNAL command", true);
+		string errmsg = "Unknown PROXYSQL INTERNAL command";
+		client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1047, (char*)"08S01", errmsg.c_str(), true);
+		if (mirror == false) {
+			MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 1047, (char *)errmsg.c_str());
+			RequestEnd(NULL, 1047, errmsg.c_str());
+		}
 	}
 	else if constexpr (std::is_same_v<S, PgSQL_Session>) {
 		if (pkt->size >= (5 + 1 + l) && strncasecmp((char*)"PROXYSQL INTERNAL SESSION", (char*)pkt->ptr + 5, l) == 0) {
@@ -325,7 +330,10 @@ void Base_Session<S, DS, B, T>::return_proxysql_internal(PtrSize_t* pkt) {
 			char* pta[1];
 			pta[0] = (char*)s.c_str();
 			resultset->add_row(pta);
-			SQLite3_to_Postgres(client_myds->PSarrayOUT, resultset, nullptr, 0, (const char*)pkt->ptr + 5);
+
+			unsigned int nTxn = NumActiveTransactions();
+			char txn_state = (nTxn ? 'T' : 'I');
+			SQLite3_to_Postgres(client_myds->PSarrayOUT, resultset, nullptr, 0, (const char*)pkt->ptr + 5, txn_state);
 			delete resultset;
 			l_free(pkt->size, pkt->ptr);
 			return;
@@ -337,7 +345,12 @@ void Base_Session<S, DS, B, T>::return_proxysql_internal(PtrSize_t* pkt) {
 		assert(0);
 	}
 	if (mirror == false) {
-		RequestEnd(NULL);
+		if constexpr (std::is_same_v<S, MySQL_Session>) {
+			// do nothing , logic moded
+		}
+		else if constexpr (std::is_same_v<S, PgSQL_Session>) {
+			RequestEnd(NULL, 0, NULL);
+		}
 	}
 	else {
 		client_myds->DSS = STATE_SLEEP;
@@ -409,8 +422,8 @@ bool Base_Session<S,DS,B,T>::handler_special_queries_STATUS(PtrSize_t* pkt) {
 			resultset->add_column_definition(SQLITE_TEXT, "DATABASE()");
 			resultset->add_column_definition(SQLITE_TEXT, "USER()");
 			char* pta[2];
-			pta[0] = client_myds->myconn->userinfo->username;
-			pta[1] = client_myds->myconn->userinfo->schemaname;
+			pta[0] = client_myds->myconn->userinfo->schemaname;
+			pta[1] = client_myds->myconn->userinfo->username;
 			resultset->add_row(pta);
 			bool deprecate_eof_active = client_myds->myconn->options.client_flag & CLIENT_DEPRECATE_EOF;
 			SQLite3_to_MySQL(resultset, NULL, 0, &client_myds->myprot, false, deprecate_eof_active);
@@ -433,35 +446,22 @@ bool Base_Session<S,DS,B,T>::handler_special_queries_STATUS(PtrSize_t* pkt) {
 			string vals[4];
 			json j = {};
 			json& jc = j["conn"];
-			if constexpr (std::is_same_v<S, MySQL_Session>) {
-				MySQL_Connection * conn = client_myds->myconn;
-				conn->variables[SQL_CHARACTER_SET_CLIENT].fill_client_internal_session(jc, SQL_CHARACTER_SET_CLIENT);
-				conn->variables[SQL_CHARACTER_SET_CONNECTION].fill_client_internal_session(jc, SQL_CHARACTER_SET_CONNECTION);
-				conn->variables[SQL_CHARACTER_SET_DATABASE].fill_client_internal_session(jc, SQL_CHARACTER_SET_DATABASE);
-			} else if constexpr (std::is_same_v<S, PgSQL_Session>) {
-				PgSQL_Connection * conn = client_myds->myconn;
-				conn->variables[SQL_CHARACTER_SET_CLIENT].fill_client_internal_session(jc, SQL_CHARACTER_SET_CLIENT);
-				conn->variables[SQL_CHARACTER_SET_CONNECTION].fill_client_internal_session(jc, SQL_CHARACTER_SET_CONNECTION);
-				conn->variables[SQL_CHARACTER_SET_DATABASE].fill_client_internal_session(jc, SQL_CHARACTER_SET_DATABASE);
-			} else {
-				assert(0);
-			}
+
+			MySQL_Connection * conn = client_myds->myconn;
+			conn->variables[SQL_CHARACTER_SET_CLIENT].fill_client_internal_session(jc, SQL_CHARACTER_SET_CLIENT);
+			conn->variables[SQL_CHARACTER_SET_CONNECTION].fill_client_internal_session(jc, SQL_CHARACTER_SET_CONNECTION);
+			conn->variables[SQL_CHARACTER_SET_DATABASE].fill_client_internal_session(jc, SQL_CHARACTER_SET_DATABASE);
+			
 
 			// @@character_set_client
 			vals[0] = jc[mysql_tracked_variables[SQL_CHARACTER_SET_CLIENT].internal_variable_name];
 			// @@character_set_connection
 			vals[1] = jc[mysql_tracked_variables[SQL_CHARACTER_SET_CONNECTION].internal_variable_name];
 			// @@character_set_server
-			if constexpr (std::is_same_v<S, MySQL_Session>) {
-				vals[2] = string(mysql_thread___default_variables[SQL_CHARACTER_SET]);
-			} else if constexpr (std::is_same_v<S, PgSQL_Session>) {
-				vals[2] = string(mysql_thread___default_variables[SQL_CHARACTER_SET]);
-			} else {
-				assert(0);
-			}
+			vals[2] = string(mysql_thread___default_variables[SQL_CHARACTER_SET]);
 			// @@character_set_database
 			vals[3] = jc[mysql_tracked_variables[SQL_CHARACTER_SET_DATABASE].internal_variable_name];
-
+			
 			const char* pta[4];
 			for (int i = 0; i < 4; i++) {
 				pta[i] = vals[i].c_str();
@@ -602,12 +602,14 @@ unsigned int Base_Session<S,DS,B,T>::NumActiveTransactions(bool check_savepoint)
 				if (_mybe->server_myds->myconn->IsActiveTransaction()) {
 					ret++;
 				} else {
-					// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
-					// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
-					// SAVEPOINT and autocommit=0
-					if (check_savepoint) {
-						if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
-							ret++;
+					if constexpr (std::is_same_v<S, MySQL_Session>) {
+						// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
+						// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
+						// SAVEPOINT and autocommit=0
+						if (check_savepoint) {
+							if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
+								ret++;
+							}
 						}
 					}
 				}
@@ -666,17 +668,18 @@ int Base_Session<S,DS,B,T>::FindOneActiveTransaction(bool check_savepoint) {
 			if (_mybe->server_myds->myconn) {
 				if (_mybe->server_myds->myconn->IsKnownActiveTransaction()) {
 					return (int)_mybe->server_myds->myconn->parent->myhgc->hid;
-				}
-				else if (_mybe->server_myds->myconn->IsActiveTransaction()) {
+				} else if (_mybe->server_myds->myconn->IsActiveTransaction()) {
 					ret = (int)_mybe->server_myds->myconn->parent->myhgc->hid;
 				}
 				else {
-					// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
-					// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
-					// SAVEPOINT and autocommit=0
-					if (check_savepoint) {
-						if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
-							return (int)_mybe->server_myds->myconn->parent->myhgc->hid;
+					if constexpr (std::is_same_v<S, MySQL_Session>) {
+						// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
+						// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
+						// SAVEPOINT and autocommit=0
+						if (check_savepoint) {
+							if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
+								return (int)_mybe->server_myds->myconn->parent->myhgc->hid;
+							}
 						}
 					}
 				}
