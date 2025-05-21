@@ -2060,8 +2060,10 @@ bool MySQL_Threads_Handler::set_variable(char *name, const char *value) {	// thi
 		}
 	}
 	if (!strcasecmp(name,"threads")) {
-		unsigned int intv=atoi(value);
-		if ((num_threads==0 || num_threads==intv || mysql_threads==NULL) && intv > 0 && intv < 256) {
+		const uint32_t intv { !GloVars.global.mysql_workers ? uint32_t(0) : atoi(value) };
+		const bool valid_val { (intv > 0 && intv < 256) || (!GloVars.global.mysql_workers && intv == 0) };
+
+		if ((num_threads==0 || num_threads==intv || mysql_threads==NULL) && valid_val) {
 			num_threads=intv;
 			this->status_variables.p_gauge_array[p_th_gauge::mysql_thread_workers]->Set(intv);
 			return true;
@@ -2405,7 +2407,7 @@ void MySQL_Threads_Handler::init(unsigned int num, size_t stack) {
 		num_threads=num;
 		this->status_variables.p_gauge_array[p_th_gauge::mysql_thread_workers]->Set(num);
 	} else {
-		if (num_threads==0)  {
+		if (num_threads==0 && GloVars.global.mysql_workers)  {
 			num_threads=DEFAULT_NUM_THREADS; //default
 			this->status_variables.p_gauge_array[p_th_gauge::mysql_thread_workers]->Set(DEFAULT_NUM_THREADS);
 		}
