@@ -2318,12 +2318,15 @@ __end_while_pool:
 					if (resultset) {
 						SQLite3_result * resultset2 = NULL;
 
-					// In debug, run the code to generate metrics so that it can be tested even if the web interface plugin isn't loaded.
-					#ifdef DEBUG
-						if (true) {
-					#else
-						if (GloVars.web_interface_plugin) {
-					#endif
+						// In debug, run the code to generate metrics so that it can be tested even if
+						// the 'web_interface_plugin' isn't loaded.
+						if (
+							#ifdef DEBUG
+								true
+							#else
+								GloVars.web_interface_plugin
+							#endif
+						) {
 							resultset2 = MyHGM->SQL3_Connection_Pool(false);
 						}
 						GloProxyStats->MyHGM_Handler_sets(resultset, resultset2);
