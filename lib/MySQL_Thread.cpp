@@ -2462,7 +2462,7 @@ proxysql_mysql_thread_t * MySQL_Threads_Handler::create_thread(unsigned int tn, 
 			if (GloVars.set_thread_name == true) {
 				char thr_name[16];
 				snprintf(thr_name, sizeof(thr_name), "MySQLIdle%d", tn);
-				pthread_setname_np(mysql_threads[tn].thread_id, thr_name);
+				pthread_setname_np(mysql_threads_idles[tn].thread_id, thr_name);
 			}
 		}
 #endif // defined(__linux__) || defined(__FreeBSD__)
