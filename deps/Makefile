@@ -60,9 +60,13 @@ default: $(targets)
 
 ### deps targets
 
+include ../common_mk/openssl_flags.mk
+include ../common_mk/openssl_version_check.mk
+
+
 libinjection/libinjection/src/libinjection.a:
 	cd libinjection && rm -rf libinjection-*/ || true
-	cd libinjection && tar -zxf libinjection-3.10.0.tar.gz
+	cd libinjection && tar -zxf libinjection-*.tar.gz
 ifneq ($(CENTOSVER),6)
 	cd libinjection/libinjection && patch -p1 < ../update-build-py3.diff
 	cd libinjection/libinjection && patch -p1 < ../libinjection_sqli.c.patch
@@ -76,8 +80,6 @@ endif
 
 libinjection: libinjection/libinjection/src/libinjection.a
 
-include ../common_mk/openssl_flags.mk
-include ../common_mk/openssl_version_check.mk
 
 libhttpserver/libhttpserver/build/src/.libs/libhttpserver.a: libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/libmicrohttpd.a re2/re2/obj/libre2.a
 	cd libhttpserver && rm -rf libhttpserver-*/ || true
@@ -114,7 +116,9 @@ coredumper/coredumper/src/libcoredumper.a:
 	cd coredumper/coredumper && patch -p1 < ../includes.patch
 	cd coredumper/coredumper && cmake . -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug
 	cd coredumper/coredumper && CC=${CC} CXX=${CXX} ${MAKE}
+
 coredumper: coredumper/coredumper/src/libcoredumper.a
+
 
 curl/curl/lib/.libs/libcurl.a:
 	cd curl && rm -rf curl-*/ || true
@@ -160,11 +164,7 @@ clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib.a:
 	cd clickhouse-cpp && rm -rf clickhouse-cpp-*/ || true
 	cd clickhouse-cpp && tar -zxf clickhouse-cpp-*.tar.gz
 	cd clickhouse-cpp && ln -fsT clickhouse-cpp-*/ clickhouse-cpp
-#	cd clickhouse-cpp/clickhouse-cpp && patch clickhouse/base/wire_format.h < ../wire_format.patch
-
-#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/base/options.h
 	cd clickhouse-cpp/clickhouse-cpp && patch -p0 < ../fix_ciso646.patch
-
 	cd clickhouse-cpp/clickhouse-cpp && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo .
 	cd clickhouse-cpp/clickhouse-cpp && CC=${CC} CXX=${CXX} ${MAKE}
 
@@ -173,7 +173,7 @@ clickhouse-cpp: clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib.a
 
 libdaemon/libdaemon/libdaemon/.libs/libdaemon.a:
 	cd libdaemon && rm -rf libdaemon-*/ || true
-	cd libdaemon && tar -zxf libdaemon-0.14.tar.gz
+	cd libdaemon && tar -zxf libdaemon-*.tar.gz
 	cd libdaemon/libdaemon && patch -p0 < ../daemon_fork_umask.patch
 	cd libdaemon/libdaemon && cp ../config.guess . && chmod +x config.guess && cp ../config.sub . && chmod +x config.sub && ./configure --disable-examples
 	cd libdaemon/libdaemon && CC=${CC} CXX=${CXX} ${MAKE}
@@ -183,7 +183,7 @@ libdaemon: libdaemon/libdaemon/libdaemon/.libs/libdaemon.a
 
 jemalloc/jemalloc/lib/libjemalloc.a:
 	cd jemalloc && rm -rf jemalloc-*/ || true
-	cd jemalloc && tar --no-same-owner -jxf jemalloc-5.2.0.tar.bz2
+	cd jemalloc && tar --no-same-owner -jxf jemalloc-*.tar.bz2
 	cd jemalloc/jemalloc && patch src/jemalloc.c < ../issue823.520.patch
 	cd jemalloc/jemalloc && patch src/jemalloc.c < ../issue2358.patch
 	cd jemalloc/jemalloc && patch -p0 < ../nothrow.patch
@@ -196,7 +196,7 @@ jemalloc: jemalloc/jemalloc/lib/libjemalloc.a
 
 mariadb-client-library/mariadb_client/libmariadb/libmariadbclient.a:
 	cd mariadb-client-library && rm -rf mariadb-connector-c-*/ || true
-	cd mariadb-client-library && tar -zxf mariadb-connector-c-3.3.8-src.tar.gz
+	cd mariadb-client-library && tar -zxf mariadb-connector-c-*-src.tar.gz
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../plugin_auth_CMakeLists.txt.patch
 	cd mariadb-client-library/mariadb_client && cmake . -Wno-dev -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOPENSSL_ROOT_DIR=$(SSL_IDIR) -DOPENSSL_LIBRARIES=$(SSL_LDIR) -DICONV_LIBRARIES=$(brew --prefix libiconv)/lib -DICONV_INCLUDE=$(brew --prefix libiconv)/include .
 ifeq ($(PROXYDEBUG),1)
@@ -238,9 +238,6 @@ endif
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_rpl.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../cmakelists.txt.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_lib.c.metadata_column_check.patch
-
-#	cd mariadb-client-library/mariadb_client && sed -i 's/\tbool;/\tbbool;/' ./include/ma_global.h
-#	cd mariadb-client-library/mariadb_client && sed -i 's/ bool / bbool /' ./unittest/libmariadb/ssl.c
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../fix_bool.patch
 
 	cd mariadb-client-library/mariadb_client && CC=${CC} CXX=${CXX} ${MAKE} mariadbclient
@@ -261,16 +258,14 @@ sqlite3/sqlite3/sqlite3.o:
 
 sqlite3: sqlite3/sqlite3/sqlite3.o
 
-#libconfig/libconfig/lib/.libs/libconfig++.a:
+
 libconfig/libconfig/out/libconfig++.a:
 	cd libconfig && rm -rf libconfig-*/ || true
 	cd libconfig && tar -zxf libconfig-*.tar.gz
-#	cd libconfig/libconfig && autoreconf
-#	cd libconfig/libconfig && ./configure --disable-examples
+	cd libconfig && ln -fsT libconfig-*/ libconfig
 	cd libconfig/libconfig && cmake -DBUILD_SHARED_LIBS=0 -DBUILD_EXAMPLES=0 -DBUILD_TESTS=0 -DBUILD_FUZZERS=0 .
 	cd libconfig/libconfig && CC=${CC} CXX=${CXX} ${MAKE}
 
-#libconfig: libconfig/libconfig/lib/.libs/libconfig++.a
 libconfig: libconfig/libconfig/out/libconfig++.a
 
 
@@ -314,6 +309,7 @@ pcre/pcre/.libs/libpcre.a:
 
 pcre: pcre/pcre/.libs/libpcre.a
 
+
 postgresql/postgresql/src/interfaces/libpq/libpq.a:
 	cd postgresql && rm -rf postgresql-*/ || true
 	cd postgresql && tar -zxf postgresql-*.tar.gz
@@ -328,6 +324,7 @@ postgresql/postgresql/src/interfaces/libpq/libpq.a:
 
 postgresql: postgresql/postgresql/src/interfaces/libpq/libpq.a
 
+
 libusual/libusual/.libs/libusual.a:
 	cd libusual && rm -rf libusual-*/ || true
 	cd libusual && tar -zxf libusual-*.tar.gz
@@ -337,11 +334,13 @@ libusual/libusual/.libs/libusual.a:
 
 libusual: libusual/libusual/.libs/libusual.a
 
+
 libscram/lib/libscram.a:postgresql/postgresql/src/interfaces/libpq/libpq.a 
 	cd libscram && rm -rf lib/* || true
 	cd libscram && CC=${CC} CXX=${CXX} ${MAKE} LIBOPENSSL_DIR="$(SSL_IDIR)" POSTGRESQL_DIR="$(shell pwd)/postgresql/postgresql/"
 
 libscram: libscram/lib/libscram.a
+
 
 ### clean targets
 
