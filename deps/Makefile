@@ -162,13 +162,8 @@ clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib.a:
 	cd clickhouse-cpp && ln -fsT clickhouse-cpp-*/ clickhouse-cpp
 #	cd clickhouse-cpp/clickhouse-cpp && patch clickhouse/base/wire_format.h < ../wire_format.patch
 
-	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/base/options.h
-	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/base/config.h
-	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/numeric/int128.h
-	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/numeric/int128.cc
-#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's|absl/numeric/int128.h|contrib/absl/absl/numeric/int128.h|' clickhouse/types/types.h
-#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's|absl/base/config.h|../base/config.h|' contrib/absl/absl/numeric/int128.h
-#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's|absl/base/options.h|../base/options.h|' contrib/absl/absl/base/config.h
+#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/base/options.h
+	cd clickhouse-cpp/clickhouse-cpp && patch -p0 < ../fix_ciso646.patch
 
 	cd clickhouse-cpp/clickhouse-cpp && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo .
 	cd clickhouse-cpp/clickhouse-cpp && CC=${CC} CXX=${CXX} ${MAKE}
@@ -244,8 +239,9 @@ endif
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../cmakelists.txt.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_lib.c.metadata_column_check.patch
 
-	cd mariadb-client-library/mariadb_client && sed -i 's/\tbool;/\tbbool;/' ./include/ma_global.h
-	cd mariadb-client-library/mariadb_client && sed -i 's/ bool / bbool /' ./unittest/libmariadb/ssl.c
+#	cd mariadb-client-library/mariadb_client && sed -i 's/\tbool;/\tbbool;/' ./include/ma_global.h
+#	cd mariadb-client-library/mariadb_client && sed -i 's/ bool / bbool /' ./unittest/libmariadb/ssl.c
+	cd mariadb-client-library/mariadb_client && patch -p0 < ../fix_bool.patch
 
 	cd mariadb-client-library/mariadb_client && CC=${CC} CXX=${CXX} ${MAKE} mariadbclient
 #	cd mariadb-client-library/mariadb_client/include && make my_config.h
