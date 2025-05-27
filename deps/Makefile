@@ -156,15 +156,24 @@ lz4/lz4/lib/liblz4.a:
 lz4: lz4/lz4/lib/liblz4.a
 
 
-clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib-static.a:
+clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib.a:
 	cd clickhouse-cpp && rm -rf clickhouse-cpp-*/ || true
-	cd clickhouse-cpp && tar -zxf v2.3.0.tar.gz
-	cd clickhouse-cpp && ln -fs clickhouse-cpp-*/ clickhouse-cpp
-	cd clickhouse-cpp/clickhouse-cpp && patch clickhouse/base/wire_format.h < ../wire_format.patch
+	cd clickhouse-cpp && tar -zxf clickhouse-cpp-*.tar.gz
+	cd clickhouse-cpp && ln -fsT clickhouse-cpp-*/ clickhouse-cpp
+#	cd clickhouse-cpp/clickhouse-cpp && patch clickhouse/base/wire_format.h < ../wire_format.patch
+
+	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/base/options.h
+	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/base/config.h
+	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/numeric/int128.h
+	cd clickhouse-cpp/clickhouse-cpp && sed -i 's/<ciso646>/<version>/' contrib/absl/absl/numeric/int128.cc
+#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's|absl/numeric/int128.h|contrib/absl/absl/numeric/int128.h|' clickhouse/types/types.h
+#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's|absl/base/config.h|../base/config.h|' contrib/absl/absl/numeric/int128.h
+#	cd clickhouse-cpp/clickhouse-cpp && sed -i 's|absl/base/options.h|../base/options.h|' contrib/absl/absl/base/config.h
+
 	cd clickhouse-cpp/clickhouse-cpp && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo .
 	cd clickhouse-cpp/clickhouse-cpp && CC=${CC} CXX=${CXX} ${MAKE}
 
-clickhouse-cpp: clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib-static.a
+clickhouse-cpp: clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib.a
 
 
 libdaemon/libdaemon/libdaemon/.libs/libdaemon.a:
@@ -234,6 +243,10 @@ endif
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_rpl.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../cmakelists.txt.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_lib.c.metadata_column_check.patch
+
+	cd mariadb-client-library/mariadb_client && sed -i 's/\tbool;/\tbbool;/' ./include/ma_global.h
+	cd mariadb-client-library/mariadb_client && sed -i 's/ bool / bbool /' ./unittest/libmariadb/ssl.c
+
 	cd mariadb-client-library/mariadb_client && CC=${CC} CXX=${CXX} ${MAKE} mariadbclient
 #	cd mariadb-client-library/mariadb_client/include && make my_config.h
 
@@ -252,13 +265,17 @@ sqlite3/sqlite3/sqlite3.o:
 
 sqlite3: sqlite3/sqlite3/sqlite3.o
 
-libconfig/libconfig/lib/.libs/libconfig++.a:
+#libconfig/libconfig/lib/.libs/libconfig++.a:
+libconfig/libconfig/out/libconfig++.a:
 	cd libconfig && rm -rf libconfig-*/ || true
 	cd libconfig && tar -zxf libconfig-*.tar.gz
-	cd libconfig/libconfig && ./configure --disable-examples
+#	cd libconfig/libconfig && autoreconf
+#	cd libconfig/libconfig && ./configure --disable-examples
+	cd libconfig/libconfig && cmake -DBUILD_SHARED_LIBS=0 -DBUILD_EXAMPLES=0 -DBUILD_TESTS=0 -DBUILD_FUZZERS=0 .
 	cd libconfig/libconfig && CC=${CC} CXX=${CXX} ${MAKE}
 
-libconfig: libconfig/libconfig/lib/.libs/libconfig++.a
+#libconfig: libconfig/libconfig/lib/.libs/libconfig++.a
+libconfig: libconfig/libconfig/out/libconfig++.a
 
 
 prometheus-cpp/prometheus-cpp/lib/libprometheus-cpp-core.a:
@@ -304,6 +321,7 @@ pcre: pcre/pcre/.libs/libpcre.a
 postgresql/postgresql/src/interfaces/libpq/libpq.a:
 	cd postgresql && rm -rf postgresql-*/ || true
 	cd postgresql && tar -zxf postgresql-*.tar.gz
+	cd postgresql && ln -fsT postgresql-*/ postgresql
 	cd postgresql/postgresql && patch -p0 < ../get_result_from_pgconn.patch
 	cd postgresql/postgresql && patch -p0 < ../handle_row_data.patch
 	cd postgresql/postgresql && patch -p0 < ../fmt_err_msg.patch
@@ -348,7 +366,7 @@ cleanall:
 	cd re2 && rm -rf re2-*/ || true
 	cd pcre && rm -rf pcre-*/ || true
 	cd sqlite3 && rm -rf sqlite-amalgamation-*/ || true
-	cd clickhouse-cpp/ && rm -rf clickhouse-cpp-* || true
+	cd clickhouse-cpp/ && rm -rf clickhouse-cpp-*/ || true
 	cd lz4 && rm -rf lz4-*/ || true
 	cd libmicrohttpd && rm -rf libmicrohttpd-*/ || true
 	cd curl && rm -rf curl-*/ || true
