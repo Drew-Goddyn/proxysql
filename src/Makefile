@@ -46,6 +46,9 @@ PROMETHEUS_PATH := $(DEPS_PATH)/prometheus-cpp/prometheus-cpp
 PROMETHEUS_IDIR := $(PROMETHEUS_PATH)/pull/include -I$(PROMETHEUS_PATH)/core/include
 PROMETHEUS_LDIR := $(PROMETHEUS_PATH)/lib
 
+JSON_PATH := $(DEPS_PATH)/json
+JSON_IDIR := $(JSON_PATH)
+
 RE2_PATH := $(DEPS_PATH)/re2/re2
 RE2_IDIR := $(RE2_PATH)
 RE2_LDIR := $(RE2_PATH)/obj
@@ -74,7 +77,7 @@ LIBINJECTION_LDIR := $(LIBINJECTION_PATH)/src
 
 LIBHTTPSERVER_PATH := $(DEPS_PATH)/libhttpserver/libhttpserver
 LIBHTTPSERVER_IDIR := $(LIBHTTPSERVER_PATH)/src
-LIBHTTPSERVER_LDIR := $(LIBHTTPSERVER_PATH)/build/src/.libs/
+LIBHTTPSERVER_LDIR := $(LIBHTTPSERVER_PATH)/build/src/.libs
 
 MICROHTTPD_PATH := $(DEPS_PATH)/libmicrohttpd/libmicrohttpd
 MICROHTTPD_IDIR := $(MICROHTTPD_PATH) -I$(MICROHTTPD_PATH)/src/include
@@ -90,7 +93,7 @@ CURL_LDIR := $(CURL_PATH)/lib/.libs
 
 include ../common_mk/openssl_flags.mk
 
-EV_PATH := $(DEPS_PATH)/libev/libev/
+EV_PATH := $(DEPS_PATH)/libev/libev
 EV_IDIR := $(EV_PATH)
 EV_LDIR := $(EV_PATH)/.libs
 
