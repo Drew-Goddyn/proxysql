@@ -9,7 +9,8 @@ endif
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
-DISTRO := $(shell grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+DISTRO := $(shell grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"' | cut -d' ' -f1 | cut -d- -f1)
+DISTVERS := $(shell grep '^VERSION=' /etc/os-release | cut -d= -f2 | tr -d '"' | cut -d' ' -f1 | cut -d. -f1)
 
 CENTOSVER := Unknown
 ifneq (,$(wildcard /etc/system-release))
@@ -97,8 +98,10 @@ endif
 
 libinjection: libinjection/libinjection/src/libinjection.a
 
+
 include ../common_mk/openssl_flags.mk
 include ../common_mk/openssl_version_check.mk
+
 
 libhttpserver/libhttpserver/build/src/.libs/libhttpserver.a: libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/libmicrohttpd.a re2/re2/obj/libre2.a
 	cd libhttpserver && rm -rf libhttpserver-*/ || true
@@ -135,7 +138,9 @@ coredumper/coredumper/src/libcoredumper.a:
 	cd coredumper/coredumper && patch -p1 < ../includes.patch
 	cd coredumper/coredumper && cmake . -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug
 	cd coredumper/coredumper && CC=${CC} CXX=${CXX} ${MAKE}
+
 coredumper: coredumper/coredumper/src/libcoredumper.a
+
 
 curl/curl/local/lib/libcurl.a:
 	cd curl && rm -rf curl-*/ || true
@@ -185,6 +190,7 @@ clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib-static.a: abseil
 										-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 										-DCMAKE_PREFIX_PATH=$(abspath abseil/abseil-cpp/local)
 	cd clickhouse-cpp/clickhouse-cpp && CC=${CC} CXX=${CXX} ${MAKE}
+
 clickhouse-cpp: clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib-static.a
 
 
@@ -361,10 +367,16 @@ abseil/abseil-cpp/local/lib/libabsl.a:
 	cd abseil && rm -rf abseil-cpp-*/ || true
 	cd abseil && tar -zxf abseil-cpp-20250512.0.tar.gz
 	cd abseil/abseil-cpp && mkdir -p build
-	cd abseil/abseil-cpp/build && cmake .. -DCMAKE_INSTALL_PREFIX=../local -DBUILD_TESTING=OFF
+ifneq (,$(filter $(DISTRO)$(DISTVERS),almalinux8 opensuse15))
+	cd abseil/abseil-cpp && patch -p0 < ../constexpr.patch
+endif
+	cd abseil/abseil-cpp/build && cmake .. -DCMAKE_CXX_FLAGS='-D_GLIBCXX_USE_CXX11_ABI=0' -DCMAKE_INSTALL_PREFIX=../local -DBUILD_TESTING=OFF
 	cd abseil/abseil-cpp/build && CC=${CC} CXX=${CXX} ${MAKE}
 	cd abseil/abseil-cpp/build && ${MAKE} install
-	cd abseil/abseil-cpp/local/lib && ${AR} -crs --thin libabsl.a *.a
+	cd abseil/abseil-cpp/local && ln -fsT lib64 lib || true
+	#cd abseil/abseil-cpp/local/lib && ${AR} -crs --thin libabsl.a *.a # older ar doesn't support --thin
+	cd abseil/abseil-cpp/local/lib && ls libabsl_*.a | xargs -n1 ${AR} -x
+	cd abseil/abseil-cpp/local/lib && ${AR} -crs libabsl.a *.o && rm *.o
 
 abseil: abseil/abseil-cpp/local/lib/libabsl.a
 
