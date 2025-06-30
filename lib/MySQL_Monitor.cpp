@@ -2725,6 +2725,10 @@ void * monitor_replication_lag_thread(void *arg) {
 		//	goto __exit_monitor_replication_lag_thread;
 		}
 	}
+	
+	// *** CUSTOM BUILD LOG - Drew's local ProxySQL build is running! ***
+	proxy_info("\n\n\n DREW_CUSTOM_BUILD: Replication lag check executing for %s:%d (this confirms your locally built ProxySQL is running)\n", mmsd->hostname, mmsd->port);
+	
 	mmsd->async_exit_status=mysql_store_result_start(&mmsd->result,mmsd->mysql);
 	while (mmsd->async_exit_status && ((mmsd->async_exit_status & MYSQL_WAIT_TIMEOUT) == 0)) {
 		mmsd->async_exit_status=wait_for_mysql(mmsd->mysql, mmsd->async_exit_status);

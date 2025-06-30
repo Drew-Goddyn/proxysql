@@ -36,6 +36,9 @@ else
 	deps_target="build_deps_$PROXYSQL_BUILD_TYPE"
 	build_target="$PROXYSQL_BUILD_TYPE"
 fi
+# Use 'make' if MAKE variable is not set
+MAKE=${MAKE:-make}
+
 #${MAKE} cleanbuild
 ${MAKE} ${MAKEOPT} "${deps_target}"
 

@@ -1,0 +1,9 @@
+FROM debian:bullseye
+
+# Install locally built ProxySQL package instead of from repository
+COPY binaries/proxysql_*-debian11_*.deb /tmp/proxysql.deb
+RUN apt-get update && dpkg -i /tmp/proxysql.deb && apt-get install -f -y && rm /tmp/proxysql.deb
+
+ENTRYPOINT ["proxysql", "-f", "-D", "/var/lib/proxysql"]
+
+EXPOSE 6033 6032 

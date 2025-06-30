@@ -38,7 +38,8 @@ DEBUG := $(ALL_DEBUG)
 CURVER ?= 2.7.3
 #export DEBUG
 #export EXTRALINK
-export MAKE
+### Don't export MAKE when building packages - let containers use their own make
+# export MAKE
 export CURVER
 
 ### detect compiler support for c++11/17
@@ -78,9 +79,14 @@ ifeq ($(wildcard /usr/lib/systemd/system), /usr/lib/systemd/system)
 	SYSTEMD := 1
 endif
 
-### check user/group
-USERCHECK := $(shell getent passwd proxysql)
-GROUPCHECK := $(shell getent group proxysql)
+### check user/group (macOS compatible)
+ifeq ($(OS),Darwin)
+	USERCHECK := $(shell dscl . -read /Users/proxysql 2>/dev/null)
+	GROUPCHECK := $(shell dscl . -read /Groups/proxysql 2>/dev/null)
+else
+	USERCHECK := $(shell getent passwd proxysql 2>/dev/null)
+	GROUPCHECK := $(shell getent group proxysql 2>/dev/null)
+endif
 
 
 ### main targets
@@ -292,7 +298,11 @@ SYS_ARCH := $(shell uname -m)
 REL_ARCH := $(subst x86_64,amd64,$(subst aarch64,arm64,$(SYS_ARCH)))
 RPM_ARCH := .$(SYS_ARCH)
 DEB_ARCH := _$(REL_ARCH)
-REL_VERS := $(shell echo ${GIT_VERSION} | grep -Po '(?<=^v|^)[\d\.]+')
+ifeq ($(OS),Darwin)
+	REL_VERS := $(shell echo ${GIT_VERSION} | sed -E 's/^v?([0-9.]+).*/\1/')
+else
+	REL_VERS := $(shell echo ${GIT_VERSION} | grep -Po '(?<=^v|^)[\d\.]+')
+endif
 RPM_VERS := -$(REL_VERS)-1
 DEB_VERS := _$(REL_VERS)
 
@@ -313,7 +323,11 @@ amd64-fedora: fedora38 fedora38-clang fedora38-dbg fedora39 fedora39-clang fedor
 amd64-opensuse: opensuse15 opensuse15-clang opensuse15-dbg
 amd64-ubuntu: ubuntu16 ubuntu16-dbg ubuntu18 ubuntu18-dbg ubuntu20 ubuntu20-clang ubuntu20-dbg ubuntu22 ubuntu22-clang ubuntu22-dbg ubuntu24 ubuntu24-clang ubuntu24-dbg
 amd64-pkglist:
+ifeq ($(OS),Darwin)
+	@make -nk amd64-packages 2>/dev/null | sed -n 's/.*binaries\/\(proxysql[^ ]*\).*/\1/p'
+else
 	@make -nk amd64-packages 2>/dev/null | grep -Po '(?<=binaries/)proxysql\S+$$'
+endif
 
 arm64-packages: arm64-centos arm64-debian arm64-ubuntu arm64-fedora arm64-opensuse arm64-almalinux
 arm64-almalinux: almalinux8 almalinux9
@@ -323,7 +337,11 @@ arm64-fedora: fedora38 fedora39 fedora40 fedora41
 arm64-opensuse: opensuse15
 arm64-ubuntu: ubuntu16 ubuntu18 ubuntu20 ubuntu22 ubuntu24
 arm64-pkglist:
+ifeq ($(OS),Darwin)
+	@make -nk arm64-packages 2>/dev/null | sed -n 's/.*binaries\/\(proxysql[^ ]*\).*/\1/p'
+else
 	@make -nk arm64-packages 2>/dev/null | grep -Po '(?<=binaries/)proxysql\S+$$'
+endif
 
 almalinux%: build-almalinux% ;
 centos%: build-centos% ;
@@ -336,12 +354,21 @@ ubuntu%: build-ubuntu% ;
 .PHONY: build-%
 .NOTPARALLEL: build-%
 build-%: BLD_NAME=$(patsubst build-%,%,$@)
+ifeq ($(OS),Darwin)
+build-%: PKG_VERS=$(if $(filter $(shell echo ${BLD_NAME} | sed -n 's/.*\([a-z][a-z]*\).*/\1/p'),debian ubuntu),$(DEB_VERS),$(RPM_VERS))
+build-%: PKG_TYPE=$(if $(filter $(shell echo $(BLD_NAME) | sed -n 's/.*\(-de\?bu\?g\).*/\1/p'),-dbg -debug),-dbg,)
+build-%: PKG_NAME=$(firstword $(subst -, ,$(BLD_NAME)))
+build-%: PKG_COMP=$(if $(filter $(shell echo $(BLD_NAME) | sed -n 's/.*\(-clang\).*/\1/p'),-clang),-clang,)
+build-%: PKG_ARCH=$(if $(filter $(shell echo ${BLD_NAME} | sed -n 's/.*\([a-z][a-z]*\).*/\1/p'),debian ubuntu),$(DEB_ARCH),$(RPM_ARCH))
+build-%: PKG_KIND=$(if $(filter $(shell echo ${BLD_NAME} | sed -n 's/.*\([a-z][a-z]*\).*/\1/p'),debian ubuntu),deb,rpm)
+else
 build-%: PKG_VERS=$(if $(filter $(shell echo ${BLD_NAME} | grep -Po '[a-z]+'),debian ubuntu),$(DEB_VERS),$(RPM_VERS))
 build-%: PKG_TYPE=$(if $(filter $(shell echo $(BLD_NAME) | grep -Po '\-de?bu?g'),-dbg -debug),-dbg,)
 build-%: PKG_NAME=$(firstword $(subst -, ,$(BLD_NAME)))
 build-%: PKG_COMP=$(if $(filter $(shell echo $(BLD_NAME) | grep -Po '\-clang'),-clang),-clang,)
 build-%: PKG_ARCH=$(if $(filter $(shell echo ${BLD_NAME} | grep -Po '[a-z]+'),debian ubuntu),$(DEB_ARCH),$(RPM_ARCH))
 build-%: PKG_KIND=$(if $(filter $(shell echo ${BLD_NAME} | grep -Po '[a-z]+'),debian ubuntu),deb,rpm)
+endif
 build-%: PKG_FILE=binaries/proxysql$(PKG_VERS)$(PKG_TYPE)-$(PKG_NAME)$(PKG_COMP)$(PKG_ARCH).$(PKG_KIND)
 build-%:
 	@echo 'building $@'
@@ -354,7 +381,11 @@ binaries/proxysql%:
 	cd src && ${MAKE} clean
 	cd test/tap && ${MAKE} clean
 	cd test/deps && ${MAKE} cleanall
-	find . -not -path "./binaries/*" -not -path "./.git/*" -exec touch -h --date=@`git show -s --format=%ct HEAD` {} \;
+	if [ "$(OS)" = "Darwin" ]; then \
+		find . -not -path "./binaries/*" -not -path "./.git/*" -exec touch -h -t `date -r \`git show -s --format=%ct HEAD\` +%Y%m%d%H%M.%S` {} \; ; \
+	else \
+		find . -not -path "./binaries/*" -not -path "./.git/*" -exec touch -h --date=@`git show -s --format=%ct HEAD` {} \; ; \
+	fi
 	@docker compose -p proxysql down -v --remove-orphans
 	@docker compose -p proxysql up $(IMG_NAME)$(IMG_TYPE)$(IMG_COMP)_build
 	@docker compose -p proxysql down -v --remove-orphans
